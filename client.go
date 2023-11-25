@@ -42,8 +42,16 @@ const DATAGRAM_SIZE = 1096 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1
 const TIMEOUT = 5 * time.Second
 
 type node struct {
+	name     string
 	hash     string
 	children []node
+}
+
+type message struct {
+	id     []byte
+	type_  []byte
+	length []byte
+	body   []byte
 }
 
 // debug variable, set true to enable debug fmt.prints
@@ -68,7 +76,9 @@ func main() {
 
 func menu(reader *bufio.Reader, client *http.Client) {
 
+	// TODO prompt for username
 	// TODO prompt for the user to enter a path for their data's root
+	// TODO p -d interactions(?) after first request
 	for {
 		fmt.Print(`
 prot serv int!! ^_^
@@ -78,6 +88,7 @@ Options:
 	p -k: shows p's public key (if it has one)
 	p -r: shows p's root hash
 	p -d: asks for data from peer p, writes it to local file named p-timestamp
+	files: (on hold)
 	exit: exits
 =>`)
 
@@ -106,9 +117,7 @@ Options:
 		default:
 			fmt.Println("Unkown command please retry ")
 		}
-
 	}
-
 }
 
 func parseCmd(cmd string) (ret int) {
@@ -192,8 +201,13 @@ func peerRoot(tcpClient *http.Client, peer string) {
 	// TODO jp
 }
 
+// getDatum req
 func getData(peer string) {
 	// TODO write to local file
+}
+
+func sendData() {
+	// TODO send requested data func
 }
 
 // misc funcs

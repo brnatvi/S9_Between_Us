@@ -3,8 +3,9 @@ kinda trivial info, he just talks about different stream and message oriented pr
 
 ## Project
 ### Data: 
- We're gonna use hashes to ensure the integrity of files
- If file size is less than **1024 bytes**, its the merkel tree is the hash itself, otherwise its split up to multiple parts (each less than **1024 bytes**), these parts (chunks) are represented as in tree from and every node's hash is just is its children's hashes concatenated, this way if a leaf is modified there are minimal changes to the tree (quite the elegant solution tbh).
+ We're gonna use hashes to ensure the integrity of files.
+
+ If file size is less than **1024 bytes**, its merkel tree is the hash itself, otherwise its split up to multiple parts (each less than **1024 bytes**), these parts (chunks) are represented as in tree from and every node's hash is just is its children's hashes concatenated, this way if a leaf is modified there are minimal changes to the tree (quite the elegant solution tbh).
 
  In the project we have 3 types of nodes:
 
@@ -50,3 +51,21 @@ kinda trivial info, he just talks about different stream and message oriented pr
 
  email subject: Internet M2: lname1-lname2
 
+
+racine + fils
+
+racine
+ => datum for each fils?
+
+
+p -d :
+directory => 
+	1- file1, 
+	2- folder1..etc
+	0- exit  
+
+
+Store peer info in local file
+
+merkel tree -> abdou
+udp transfers (getDatum/Datum) -> Natalia
