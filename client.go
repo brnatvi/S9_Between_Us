@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
-	"crypto/tls"
+	//	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -27,14 +28,22 @@ func main() {
 	// TODO initialisation from config
 
 	// tls stuff, its obv but i comment to annoy Mr. JC :p
-	transport := &*http.DefaultTransport.(*http.Transport)
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   TIMEOUT,
-	}
+	//	transport := &*http.DefaultTransport.(*http.Transport)
+	//	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	//	client := &http.Client{
+	//		Transport: transport,
+	//		Timeout:   TIMEOUT,
+	//	}
 
-	moduls.RegistrationOnServer(client)
+	addr, err := net.ResolveUDPAddr("udp", "jch.irif.fr:8443")
+	moduls.HandleFatalError(err, "ResolveUDPAddr failure")
+
+	conn, err := net.DialUDP("udp", nil, addr)
+	moduls.HandleFatalError(err, "DialUDP failure")
+
+	moduls.RegistrationOnServer(conn)
+
+	moduls.MaintainConnectionServer(conn)
 
 	//	reader := bufio.NewReader(os.Stdin)
 	//	menu(reader, client)

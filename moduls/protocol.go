@@ -2,9 +2,12 @@ package moduls
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -18,7 +21,7 @@ type message struct {
 
 // TODO get from debug
 
-const url = "https://jch.irif.fr:8443/"
+const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
 
 var messCounter uint32 = 1
@@ -28,7 +31,8 @@ const name string = "5miles"
 const CHUNK_SIZE = 1024    // (bytes)
 const DATAGRAM_SIZE = 1096 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
 
-var isCanceled bool = false // if need to maintain connection with server
+var isCanceled bool = true // if need to maintain connection with server
+var hasRoot bool = false   // if we have a tree
 
 // MESSAGE TYPES
 const (
@@ -55,43 +59,112 @@ const (
 	DIRECTORY = 2
 )
 
-func RegistrationOnServer(tcpClient *http.Client) {
+func RegistrationOnServer(conn *net.UDPConn) {
 
-	// send Hello
-	res, err := sendHello(tcpClient)
-	HandlePanicError(err, "sendHello failure")
+	isRecieved := false
 
-	//recieve HelloReply
-	body, err := ioutil.ReadAll(res.Body)
-	HandlePanicError(err, "ReadAll failure")
-	defer res.Body.Close()
-
-	fmt.Println(string(body))
+	// send Hello till reception HelloReply
+	for !isRecieved {
+		err := sendHello(conn)
+		if err == nil {
+			isRecieved = true
+		} else {
+			time.Sleep(TIMEOUT)
+		}
+	}
 
 	//recieve PublicKey
+	buf := make([]byte, DATAGRAM_SIZE)
+	l, _, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("PublicKey: ReadFromUDP error %v\n", err)
+			return
+		}
+	}
+	if checkIfErrorRecieved(byte(PUBLIC_KEY), buf) == -1 {
+		return
+	}
+
+	newMessId := binary.BigEndian.Uint32(buf[:4])
+	fmt.Printf("newMessId %d\n", newMessId)
+
+	ServerPublicKey := buf[7:l]
+	fmt.Printf("PublicKey : %v\n", ServerPublicKey)
 
 	// send PublicKeyReply
+	buf = composeHandChakeMessage(newMessId, byte(PUBLIC_KEY_REPLY), 0, 0)
+	_, err = conn.Write(buf)
+	if err != nil {
+		log.Panic("PublicKeyReply: Write to UDP failure\n")
+		return
+	}
 
 	// recieve Root
+	buf = make([]byte, DATAGRAM_SIZE)
+	l, _, err = conn.ReadFromUDP(buf)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("Root: ReadFromUDP error %v\n", err)
+			return
+		}
+	}
+	if checkIfErrorRecieved(byte(ROOT), buf) == -1 {
+		return
+	}
+	newMessId = binary.BigEndian.Uint32(buf[:4])
+	fmt.Printf("newMessId %d\n", newMessId)
 
 	// send Hash("")
+	if !hasRoot {
+		composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
+	} else {
 
+	}
+
+	messCounter++
 }
 
-func sendHello(tcpClient *http.Client) (*http.Response, error) {
-
+func sendHello(conn *net.UDPConn) error {
+	// send Hello
 	buf := composeHandChakeMessage(messCounter, byte(HELLO), len(name)+4, 0)
+	_, err := conn.Write(buf)
+	if err != nil {
+		log.Panic("Write to UDP failure\n")
+		return err
+	}
 
-	req, err := http.NewRequest(http.MethodGet, url, bytes.NewReader(buf))
-	HandlePanicError(err, "NewRequest failure")
+	//recieve HelloReply
+	bufRes := make([]byte, DATAGRAM_SIZE)
+	l, _, err := conn.ReadFromUDP(bufRes)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("ReadFromUDP error %v\n", err)
+			return err
+		}
+	}
+	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
+		fmt.Printf("MessageId HelloReply server's != My MessageId Hello send\n")
+		// TODO Heandler
+		return nil
+	}
+	fmt.Printf("idMessage %v\n", bufRes[0:4])
+	fmt.Printf("typeMess  %v\n", bufRes[4:5])
+	fmt.Printf("lenMess   %v\n", bufRes[5:7])
+	fmt.Printf("response  %v\n\n", string(bufRes[7:l]))
 
-	body, err := ioutil.ReadAll(req.Body)
-	fmt.Printf("req body   : %v\n", body)
-	defer req.Body.Close()
+	if isCanceled {
+		if checkIfErrorRecieved(byte(HELLO_REPLY), bufRes) == -1 {
+			return err
+		}
+	} else {
+		if checkIfErrorRecieved(byte(HELLO), buf) == -1 {
+			return err
+		}
+	}
 
-	req.Header.Add("Content-Type", "application/octet-stream")
-
-	return tcpClient.Do(req)
+	isCanceled = false
+	return err
 }
 
 func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes int) []byte {
@@ -101,44 +174,62 @@ func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes 
 	i := make([]byte, 4)
 	binary.BigEndian.PutUint32(i, idMes)
 	buf.Write(i)
-	fmt.Printf("%v\n", buf.Bytes())
 
 	buf.WriteByte(typeMes)
-	fmt.Printf("%v\n", buf.Bytes())
 
 	j := make([]byte, 2)
 	binary.BigEndian.PutUint16(j, uint16(lenMes))
 	buf.Write(j)
-	fmt.Printf("%v\n", buf.Bytes())
 
 	k := make([]byte, 4)
 	binary.BigEndian.PutUint32(k, uint32(extentMes))
 	buf.Write(k)
-	fmt.Printf("%v\n", buf.Bytes())
 
 	buf.WriteString(name)
-	fmt.Printf("%v\n", buf.Bytes())
+	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
 
 	return buf.Bytes()
 }
 
-func MaintainConnectionServer(tcpClient *http.Client) {
-	if !isCanceled {
+func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes string) []byte {
 
-		// send Hello
-		res, err := sendHello(tcpClient)
-		HandlePanicError(err, "sendHello failure")
+	var buf bytes.Buffer
 
-		//recieve HelloReply
-		body, err := ioutil.ReadAll(res.Body)
-		HandlePanicError(err, "ReadAll failure")
-		defer res.Body.Close()
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
 
-		fmt.Println(string(body))
+	buf.WriteByte(typeMes)
 
-		// TODO Handle absence of response
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
 
-		time.Sleep(30 * time.Second)
+	hash := sha256.Sum256([]byte(valueMes))
+	buf.Write(hash[:])
+
+	buf.WriteString(valueMes)
+	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+func MaintainConnectionServer(conn *net.UDPConn) {
+	for {
+		if isCanceled {
+
+			err := sendHello(conn)
+			HandlePanicError(err, "sendHello failure")
+			messCounter++
+
+			// TODO Handle absence of response
+
+			time.Sleep(30 * time.Second)
+
+		} else {
+			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
+			RegistrationOnServer(conn)
+		}
 	}
 }
 
