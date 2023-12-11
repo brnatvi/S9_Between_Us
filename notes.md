@@ -52,20 +52,37 @@ kinda trivial info, he just talks about different stream and message oriented pr
  email subject: Internet M2: lname1-lname2
 
 
-racine + fils
 
-racine
- => datum for each fils?
-
-
-p -d :
-directory => 
-	1- file1, 
-	2- folder1..etc
-	0- exit  
-
-
-Store peer info in local file
-
-merkel tree -> abdou
-udp transfers (getDatum/Datum) -> Natalia
+### Traversing NAT:
+(can ignore up until section 4.2.3 Nat)
+1. **IP header** <- router checks this and modifies some fields:
+    - hop count/ttl
+    - checksum
+    - QoS/ToS
+2. **TCP/UDP header:** routers shouldn't open this but they do anyway
+    - Queueing:
+        - fair queueing (alternate whose packets to send)
+    - Middlebox (EVIL!!) modifies stuff (au dessus de IP) without permission >:(
+        1. Firewalls:
+            - With state: ie. doesnt allow incoming traffic
+    - Not a Middlebox:
+        - IDS (Intrusion Detection System): a blackbox that uses heuristics to detect possible attacks and adds the source to the ACL
+3. **Accelerators:**
+    - fake replies from the network to keep the connection up (used in situations with very high latency ie. geostationary sattelites)
+4. **NAT:**
+    - because almost all devices exist behind a NAT:
+        1. addresses arent the sole identifying information for a given device :'(
+        2. we have state within the network :terrified:
+            - wiped after rebooting :))
+            - as the entries have an expiration date, need to resend a keepalive periodically
+    - NAT traversal techniques:
+        1. Client - Server : just need periodic keepalives and it works just fine
+        2. P2P: to establish a  p2p conn through NATs we can either 
+            1. direct conn (usually fails)
+            2. send requests simultaneously
+            3. use a STUN server:
+                - both clients send a UDP request to the server
+                - server replies with their external socket 
+            - In the project we'll use a simplified STUN, as the server already has our addr, so we (kinda) skip the STUN step and jump straight to the sync part!z
+            
+        
