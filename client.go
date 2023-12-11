@@ -2,26 +2,16 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"io"
 
 	//	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"client.go/moduls"
 )
-
-type node struct {
-	name     string
-	offset   int64
-	hash     []byte
-	children []node
-}
 
 // var id = 0 // an incrementing counter for the id field
 
@@ -70,7 +60,6 @@ Options:
 	files: (on hold)
 	exit: exits
 =>`)
-
 		cmd, err := reader.ReadString('\n')
 		cmd = cmd[:len(cmd)-1]
 		moduls.HandlePanicError(err, "Read err!")
@@ -123,72 +112,4 @@ func parseCmd(cmd string) (ret int, peer string) {
 		}
 	}
 	return -1, ""
-}
-
-// TODO directory/file ==> merkel tree
-func merkelify(path string) (root node) {
-	info, err := os.Stat(path)
-	moduls.HandlePanicError(err, "os.stat error, merkelify")
-
-	hash := sha256.New()
-
-	if info.IsDir() {
-		return hashDir(path)
-	} else {
-		return hashFile(path)
-	}
-}
-
-func hashDir(path string) node {
-	var child node
-	dir, err := os.ReadDir(path)
-	moduls.HandlePanicError(err, "os.readdir err, hashDir")
-
-	for _, de := range dir {
-		if de.IsDir() {
-
-		}
-	}
-	return child
-}
-
-func hashFile(path string) node {
-
-	// child to be returned
-	var child node
-
-	fi, err := os.Stat(path)
-	moduls.HandlePanicError(err, "os.stat err, hashFile")
-
-	file, err := os.Open(path)
-	moduls.HandleFatalError(err, "error opening file "+path)
-	defer file.Close()
-
-	// making the hashes
-	chunk := make([]byte, moduls.CHUNK_SIZE)
-	var nodes []node
-
-	// hash entire file and create nodes
-	var i int64
-	for {
-		node := node{
-			name:     fmt.Sprintf("leaf%d", i),
-			children: nil,
-			offset:   i * moduls.CHUNK_SIZE,
-		}
-
-		n, err := file.Read(chunk)
-		if err == io.EOF {
-			break
-		}
-
-		moduls.HandleFatalError(err, "error reading "+path)
-		tempHash := sha256.New()
-		tempHash.Write(chunk[:n])
-
-		node.hash = tempHash.Sum(nil)
-		nodes = append(nodes, node)
-	}
-
-	return child
 }

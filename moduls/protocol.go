@@ -54,9 +54,11 @@ const (
 
 // NODE TYPES (first byte of body)
 const (
-	CHUNK     = 0
-	BIG_FILE  = 1
-	DIRECTORY = 2
+	CHUNK     = 0 // 0
+	BIG_FILE  = 1 // 1
+	DIRECTORY = 2 // 2
+	// this one is just for the max children in the tree
+	MAX_CHILDREN = 32 // 32
 )
 
 func RegistrationOnServer(conn *net.UDPConn) {
