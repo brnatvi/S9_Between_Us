@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
-
-	//	"crypto/tls"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -21,15 +21,35 @@ func main() {
 
 	// TODO initialisation from config
 
-	// tls stuff, its obv but i comment to annoy Mr. JC :p
-	//	transport := &*http.DefaultTransport.(*http.Transport)
-	//	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	//	client := &http.Client{
-	//		Transport: transport,
-	//		Timeout:   TIMEOUT,
-	//	}
+	// addresses of server
+	var servAdresses []string
 
-	addr, err := net.ResolveUDPAddr("udp", "jch.irif.fr:8443")
+	// Create TCP client
+	transport := &*http.DefaultTransport.(*http.Transport)
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   TIMEOUT,
+	}
+
+	// Get addresses of server
+	res, _ := moduls.SendGetRequest(client, "https://jch.irif.fr:8443/peers/jch.irif.fr/addresses")
+
+	if res.StatusCode == 200 {
+		body, _ := io.ReadAll(res.Body)
+		strBody := string(body[:])
+		adresses := strings.Split(strBody, "\n")
+		for _, addr := range adresses {
+			servAdresses = append(servAdresses, addr)
+		}
+	} else {
+		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
+		return
+	}
+	res.Body.Close()
+
+	// Create UDP connection with server
+	addr, err := net.ResolveUDPAddr("udp", servAdresses[0])
 	moduls.HandleFatalError(err, "ResolveUDPAddr failure")
 
 	conn, err := net.DialUDP("udp", nil, addr)
@@ -37,7 +57,7 @@ func main() {
 
 	moduls.RegistrationOnServer(conn)
 
-	go moduls.MaintainConnectionServer(conn)
+	//go moduls.MaintainConnectionServer(conn)
 
 	//	reader := bufio.NewReader(os.Stdin)
 	//	menu(reader, client)

@@ -61,6 +61,7 @@ const (
 	MAX_CHILDREN = 32 // 32
 )
 
+// Register on the server
 func RegistrationOnServer(conn *net.UDPConn) {
 
 	isRecieved := false
@@ -121,12 +122,34 @@ func RegistrationOnServer(conn *net.UDPConn) {
 	if !hasRoot {
 		composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
 	} else {
-
+		// TODO
 	}
-
 	messCounter++
 }
 
+// Maintain connection with server - sends messages every 30 seconds
+func MaintainConnectionServer(conn *net.UDPConn) {
+	for {
+		if isCanceled {
+
+			err := sendHello(conn)
+			HandlePanicError(err, "sendHello failure")
+			messCounter++
+
+			// TODO Handle absence of response
+
+			time.Sleep(30 * time.Second)
+
+		} else {
+			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
+			RegistrationOnServer(conn)
+		}
+	}
+}
+
+// ==========================   Auxiliary functions ========================== //
+
+// Send "Hello" & Recieve "HelloReply"
 func sendHello(conn *net.UDPConn) error {
 	// send Hello
 	buf := composeHandChakeMessage(messCounter, byte(HELLO), len(name)+4, 0)
@@ -169,6 +192,7 @@ func sendHello(conn *net.UDPConn) error {
 	return err
 }
 
+// Compose UDP handshake message (with a peer or server) and convert it to binary
 func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes int) []byte {
 
 	var buf bytes.Buffer
@@ -193,6 +217,7 @@ func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes 
 	return buf.Bytes()
 }
 
+// Composes UDP message to send data and converts it to binary
 func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes string) []byte {
 
 	var buf bytes.Buffer
@@ -214,25 +239,6 @@ func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes st
 	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
 
 	return buf.Bytes()
-}
-
-func MaintainConnectionServer(conn *net.UDPConn) {
-	for {
-		if isCanceled {
-
-			err := sendHello(conn)
-			HandlePanicError(err, "sendHello failure")
-			messCounter++
-
-			// TODO Handle absence of response
-
-			time.Sleep(30 * time.Second)
-
-		} else {
-			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
-			RegistrationOnServer(conn)
-		}
-	}
 }
 
 func SendGetRequest(tcpClient *http.Client, ReqUrl string) (*http.Response, error) {
