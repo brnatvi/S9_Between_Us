@@ -21,8 +21,10 @@ func main() {
 
 	// TODO initialisation from config
 
-	// addresses of server
+	// addresses of server and peers
+	var peersAdresses []string
 	var servAdresses []string
+	var servPublicKey []byte
 
 	// Create TCP client
 	transport := &*http.DefaultTransport.(*http.Transport)
@@ -33,20 +35,7 @@ func main() {
 	}
 
 	// Get addresses of server
-	res, _ := moduls.SendGetRequest(client, "https://jch.irif.fr:8443/peers/jch.irif.fr/addresses")
-
-	if res.StatusCode == 200 {
-		body, _ := io.ReadAll(res.Body)
-		strBody := string(body[:])
-		adresses := strings.Split(strBody, "\n")
-		for _, addr := range adresses {
-			servAdresses = append(servAdresses, addr)
-		}
-	} else {
-		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
-		return
-	}
-	res.Body.Close()
+	servAdresses = GetServerAdresses(client)
 
 	// Create UDP connection with server
 	addr, err := net.ResolveUDPAddr("udp", servAdresses[0])
@@ -55,7 +44,35 @@ func main() {
 	conn, err := net.DialUDP("udp", nil, addr)
 	moduls.HandleFatalError(err, "DialUDP failure")
 
-	moduls.RegistrationOnServer(conn)
+	// Register on Server
+	servPublicKey = moduls.RegistrationOnServer(conn)
+
+	// Get peers' addresses
+	peersNames := moduls.GetPeers(client)
+
+	if peersNames != nil {
+		for ind, name := range peersNames {
+			peerAddr := moduls.PeerAddr(client, name)
+			if peerAddr != nil {
+				for _, ad := range peerAddr {
+					peersAdresses = append(peersAdresses, ad)
+					fmt.Printf("%d peer : %s  has adresse : %s \n", ind, name, ad)
+				}
+			}
+		}
+		fmt.Println("")
+	} else {
+		fmt.Printf("Has not peers \n")
+	}
+
+	rootPeerServ := moduls.PeerRoot(client, "jch.irif.fr")
+	//keyPeerServ := moduls.PeerKey(client, "jch.irif.fr")		// doesn't return a key
+
+	fmt.Printf("peer root : %v \n", rootPeerServ)
+	fmt.Printf("peer key : %v \n", servPublicKey)
+
+	value := moduls.GetDataByHash(conn, rootPeerServ)
+	fmt.Printf("\nvalue : %v \n", value)
 
 	//go moduls.MaintainConnectionServer(conn)
 
@@ -132,4 +149,28 @@ func parseCmd(cmd string) (ret int, peer string) {
 		}
 	}
 	return -1, ""
+}
+
+// Get addresses of server
+func GetServerAdresses(tcpClient *http.Client) []string {
+	res, _ := moduls.SendGetRequest(tcpClient, "https://jch.irif.fr:8443/peers/jch.irif.fr/addresses")
+	if res.StatusCode == 200 {
+		var servAdresses []string
+
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+
+		strBody := string(body[:])
+		adresses := strings.Split(strBody, "\n")
+
+		for _, addr := range adresses {
+			if addr != "" {
+				servAdresses = append(servAdresses, addr)
+			}
+		}
+		return servAdresses
+	} else {
+		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
+		return nil
+	}
 }

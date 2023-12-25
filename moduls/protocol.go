@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,7 @@ var messCounter uint32 = 1
 const name string = "5miles"
 
 const CHUNK_SIZE = 1024    // (bytes)
-const DATAGRAM_SIZE = 1096 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
+const DATAGRAM_SIZE = 2048 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
 
 var isCanceled bool = true // if need to maintain connection with server
 var hasRoot bool = false   // if we have a tree
@@ -61,8 +62,87 @@ const (
 	MAX_CHILDREN = 32 // 32
 )
 
+// ==========================   Main functions ========================== //
+
+// getDatum req
+func GetData(peer string) {
+	// TODO write to local file
+}
+
+func SendData() {
+	// TODO send requested data func
+}
+
+func GetDataByHash(conn *net.UDPConn, hash []byte) []byte {
+	// send GetDatum
+	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), 32, hash, 0)
+	_, err := conn.Write(buf)
+	if err != nil {
+		log.Panic("GetDataByHash: Write to UDP failure\n")
+		return nil
+	}
+
+	//recieve Datum
+	bufRes := make([]byte, DATAGRAM_SIZE)
+	all, _, err := conn.ReadFromUDP(bufRes)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("ReadFromUDP error %v\n", err)
+			return nil
+		}
+	}
+
+	// check id
+	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
+		fmt.Printf("MessageId HelloReply server's != My MessageId Hello send\n")
+		// TODO Heandler
+		return nil
+	}
+
+	// check type
+	if CheckTypeEquality(byte(DATUM), bufRes) == -1 {
+		if CheckTypeEquality(byte(NO_DATUM), bufRes) == -1 {
+			fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
+			return nil
+		} else {
+			fmt.Printf("GetDataByHash: NO_DATUM was received\n")
+			return nil
+		}
+	}
+
+	fmt.Printf("Was recieved %d bytes at all\n", all)
+
+	lenValue := binary.BigEndian.Uint16(bufRes[5:7]) - 32
+
+	// Check hash 1 : if hash in GetDatum == hash in DATUM
+	for i := 0; i < 32; i++ {
+		if bufRes[7+i] != hash[i] {
+			PanicMessage("GetDataByHash: Data substitution !!! The hash I received is not the one I asked for\n")
+			return nil
+		}
+	}
+
+	value := bufRes[39:(39 + lenValue)]
+
+	// Check hash 2 : if hash in DATUM is really hash of value (there was no value substitution)
+	hashedValue := sha256.Sum256(value)
+
+	for i := 0; i < 32; i++ {
+		if hashedValue[i] != hash[i] {
+			PanicMessage("GetDataByHash: Data substitution !!! The hash(value) does not match the one I asked for\n")
+			return nil
+		}
+	}
+
+	fmt.Printf("It's ok with hash\n")
+
+	messCounter++
+
+	return value
+}
+
 // Register on the server
-func RegistrationOnServer(conn *net.UDPConn) {
+func RegistrationOnServer(conn *net.UDPConn) []byte {
 
 	isRecieved := false
 
@@ -82,11 +162,11 @@ func RegistrationOnServer(conn *net.UDPConn) {
 	if err != nil {
 		if err != io.EOF {
 			fmt.Printf("PublicKey: ReadFromUDP error %v\n", err)
-			return
+			return nil
 		}
 	}
-	if checkIfErrorRecieved(byte(PUBLIC_KEY), buf) == -1 {
-		return
+	if CheckTypeEquality(byte(PUBLIC_KEY), buf) == -1 {
+		return nil
 	}
 
 	newMessId := binary.BigEndian.Uint32(buf[:4])
@@ -100,7 +180,7 @@ func RegistrationOnServer(conn *net.UDPConn) {
 	_, err = conn.Write(buf)
 	if err != nil {
 		log.Panic("PublicKeyReply: Write to UDP failure\n")
-		return
+		return nil
 	}
 
 	// recieve Root
@@ -109,11 +189,11 @@ func RegistrationOnServer(conn *net.UDPConn) {
 	if err != nil {
 		if err != io.EOF {
 			fmt.Printf("Root: ReadFromUDP error %v\n", err)
-			return
+			return nil
 		}
 	}
-	if checkIfErrorRecieved(byte(ROOT), buf) == -1 {
-		return
+	if CheckTypeEquality(byte(ROOT), buf) == -1 {
+		return nil
 	}
 	newMessId = binary.BigEndian.Uint32(buf[:4])
 	fmt.Printf("newMessId %d\n", newMessId)
@@ -125,6 +205,7 @@ func RegistrationOnServer(conn *net.UDPConn) {
 		// TODO
 	}
 	messCounter++
+	return ServerPublicKey
 }
 
 // Maintain connection with server - sends messages every 30 seconds
@@ -168,6 +249,8 @@ func sendHello(conn *net.UDPConn) error {
 			return err
 		}
 	}
+
+	// check id
 	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
 		fmt.Printf("MessageId HelloReply server's != My MessageId Hello send\n")
 		// TODO Heandler
@@ -176,14 +259,17 @@ func sendHello(conn *net.UDPConn) error {
 	fmt.Printf("idMessage %v\n", bufRes[0:4])
 	fmt.Printf("typeMess  %v\n", bufRes[4:5])
 	fmt.Printf("lenMess   %v\n", bufRes[5:7])
-	fmt.Printf("response  %v\n\n", string(bufRes[7:l]))
+	fmt.Printf("response + sign  %v\n\n", string(bufRes[7:l]))
 
+	// check type
 	if isCanceled {
-		if checkIfErrorRecieved(byte(HELLO_REPLY), bufRes) == -1 {
+		if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
+			fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
 			return err
 		}
 	} else {
-		if checkIfErrorRecieved(byte(HELLO), buf) == -1 {
+		if CheckTypeEquality(byte(HELLO), bufRes) == -1 {
+			fmt.Printf("sendHello: Not HELLO was recieved\n")
 			return err
 		}
 	}
@@ -206,6 +292,32 @@ func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes 
 	j := make([]byte, 2)
 	binary.BigEndian.PutUint16(j, uint16(lenMes))
 	buf.Write(j)
+
+	k := make([]byte, 4)
+	binary.BigEndian.PutUint32(k, uint32(extentMes))
+	buf.Write(k)
+
+	buf.WriteString(name)
+	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+func composeGetDatumMessage(idMes uint32, typeMes uint8, lenMes int, hash []byte, extentMes int) []byte {
+
+	var buf bytes.Buffer
+
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
+
+	buf.WriteByte(typeMes)
+
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
+
+	buf.Write(hash)
 
 	k := make([]byte, 4)
 	binary.BigEndian.PutUint32(k, uint32(extentMes))
@@ -250,45 +362,124 @@ func SendGetRequest(tcpClient *http.Client, ReqUrl string) (*http.Response, erro
 	return res, err
 }
 
-func GetPeers(tcpClient *http.Client) {
-	res, err := SendGetRequest(tcpClient, url+"peers")
-	HandlePanicError(err, "get error /peers")
-	// TODO Sormat the addresses nicely before return
-	DebugPrint(res.Body)
+// Get peers' names
+func GetPeers(tcpClient *http.Client) []string {
+	res, err := SendGetRequest(tcpClient, url+"/peers/")
+	HandlePanicError(err, "GetPeers failure")
+	if err != nil {
+		return nil
+	}
+
+	if res.StatusCode == 200 {
+		var peersNames []string
+
+		body, _ := io.ReadAll(res.Body)
+		strBody := string(body[:])
+		adresses := strings.Split(strBody, "\n")
+
+		for _, addr := range adresses {
+			if addr != "" {
+				peersNames = append(peersNames, addr)
+			}
+		}
+		res.Body.Close()
+		return peersNames
+	} else {
+		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
+		res.Body.Close()
+		return nil
+	}
 }
 
-func PeerAddr(tcpClient *http.Client, peer string) {
+// Get peer's address
+// Obtaining the following status codes is possible:
+// - 200 if the peer is known, and then the body contains a list of UDP socket addresses, one per line;
+// - 404 if peer is not known.
+func PeerAddr(tcpClient *http.Client, peer string) []string {
+	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/addresses")
+	HandlePanicError(err, "PeerAddr failure")
+	if err != nil {
+		return nil
+	}
 
-	res, err := SendGetRequest(tcpClient, url+"peers/"+peer+"/addresses")
-	DebugPrint(url + "peers/" + peer + "/addresses")
-	HandlePanicError(err, "get error /peers/p/addresses")
-	// TODO jp (just print)
-	p := make([]byte, 200)
-	res.Body.Read(p)
-	DebugPrint(p)
+	if res.StatusCode == 404 {
+		fmt.Printf("Peer %s is unknown\n", peer)
+		return nil
+	} else {
+		var peerNames []string
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
 
+		strBody := string(body[:])
+		adresses := strings.Split(strBody, "\n")
+
+		for _, addr := range adresses {
+			if addr != "" {
+				peerNames = append(peerNames, addr)
+			}
+		}
+		return peerNames
+	}
 }
 
-func PeerKey(tcpClient *http.Client, peer string) {
-	res, err := SendGetRequest(tcpClient, url+"peers/"+peer+"/key")
-	HandlePanicError(err, "get error /peers/p/key")
-	// TODO Sp
-	DebugPrint(res.Body)
+// Get peer's key
+// Obtaining the following status codes is possible:
+// - 200 if the peer is known and has announced a public key, and then the body contains the key (a	sequence of 64 bytes);
+// - 204 if the peer is known, but has not announced a public key;
+// - 404 if the peer is not known.
+func PeerKey(tcpClient *http.Client, peer string) []byte {
+	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/key")
+	HandlePanicError(err, "PeerKey failure")
+	if err != nil {
+		return nil
+	}
 
+	switch res.StatusCode {
+	case 200:
+		key := make([]byte, 200)
+		res.Body.Read(key)
+		res.Body.Close()
+		return key
+	case 404:
+		fmt.Printf("Peer %s is unknown\n", peer)
+		return nil
+	case 204:
+		fmt.Printf("Peer %s is known, but has not announced public key\n", peer)
+		return nil
+	default:
+		fmt.Printf("Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
+		return nil
+	}
 }
 
-func PeerRoot(tcpClient *http.Client, peer string) {
-	res, err := SendGetRequest(tcpClient, url+"peers/"+peer+"/root")
-	HandlePanicError(err, "get error /peers/p/root")
-	// TODO Sp
-	DebugPrint(res.Body)
-}
+// Get peer's root
+// Obtaining the following status codes is possible:
+// - 200 if the peer is known and announced a root, and then the body contains the root hash (a sequence of 32 bytes);
+// - 204 if the peer is known, but has not announced a root to the server;
+// - 404 if the peer is not known.
 
-// getDatum req
-func GetData(peer string) {
-	// TODO write to local file
-}
+func PeerRoot(tcpClient *http.Client, peer string) []byte {
+	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/root")
+	HandlePanicError(err, "PeerKey failure")
+	if err != nil {
+		return nil
+	}
 
-func SendData() {
-	// TODO send requested data func
+	switch res.StatusCode {
+	case 200:
+		root := make([]byte, 32)
+		res.Body.Read(root)
+		res.Body.Close()
+		return root
+	case 404:
+		fmt.Printf("Peer %s is unknown\n", peer)
+		return nil
+	case 204:
+		fmt.Printf("Peer %s is known, but has not announced public key\n", peer)
+		return nil
+	default:
+		fmt.Printf("Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
+		return nil
+	}
+
 }
