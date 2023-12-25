@@ -73,74 +73,6 @@ func SendData() {
 	// TODO send requested data func
 }
 
-func GetDataByHash(conn *net.UDPConn, hash []byte) []byte {
-	// send GetDatum
-	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), 32, hash, 0)
-	_, err := conn.Write(buf)
-	if err != nil {
-		log.Panic("GetDataByHash: Write to UDP failure\n")
-		return nil
-	}
-
-	//recieve Datum
-	bufRes := make([]byte, DATAGRAM_SIZE)
-	all, _, err := conn.ReadFromUDP(bufRes)
-	if err != nil {
-		if err != io.EOF {
-			fmt.Printf("ReadFromUDP error %v\n", err)
-			return nil
-		}
-	}
-
-	// check id
-	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
-		fmt.Printf("MessageId HelloReply server's != My MessageId Hello send\n")
-		// TODO Heandler
-		return nil
-	}
-
-	// check type
-	if CheckTypeEquality(byte(DATUM), bufRes) == -1 {
-		if CheckTypeEquality(byte(NO_DATUM), bufRes) == -1 {
-			fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
-			return nil
-		} else {
-			fmt.Printf("GetDataByHash: NO_DATUM was received\n")
-			return nil
-		}
-	}
-
-	fmt.Printf("Was recieved %d bytes at all\n", all)
-
-	lenValue := binary.BigEndian.Uint16(bufRes[5:7]) - 32
-
-	// Check hash 1 : if hash in GetDatum == hash in DATUM
-	for i := 0; i < 32; i++ {
-		if bufRes[7+i] != hash[i] {
-			PanicMessage("GetDataByHash: Data substitution !!! The hash I received is not the one I asked for\n")
-			return nil
-		}
-	}
-
-	value := bufRes[39:(39 + lenValue)]
-
-	// Check hash 2 : if hash in DATUM is really hash of value (there was no value substitution)
-	hashedValue := sha256.Sum256(value)
-
-	for i := 0; i < 32; i++ {
-		if hashedValue[i] != hash[i] {
-			PanicMessage("GetDataByHash: Data substitution !!! The hash(value) does not match the one I asked for\n")
-			return nil
-		}
-	}
-
-	fmt.Printf("It's ok with hash\n")
-
-	messCounter++
-
-	return value
-}
-
 // Register on the server
 func RegistrationOnServer(conn *net.UDPConn) []byte {
 
@@ -228,130 +160,7 @@ func MaintainConnectionServer(conn *net.UDPConn) {
 	}
 }
 
-// ==========================   Auxiliary functions ========================== //
-
-// Send "Hello" & Recieve "HelloReply"
-func sendHello(conn *net.UDPConn) error {
-	// send Hello
-	buf := composeHandChakeMessage(messCounter, byte(HELLO), len(name)+4, 0)
-	_, err := conn.Write(buf)
-	if err != nil {
-		log.Panic("Write to UDP failure\n")
-		return err
-	}
-
-	//recieve HelloReply
-	bufRes := make([]byte, DATAGRAM_SIZE)
-	l, _, err := conn.ReadFromUDP(bufRes)
-	if err != nil {
-		if err != io.EOF {
-			fmt.Printf("ReadFromUDP error %v\n", err)
-			return err
-		}
-	}
-
-	// check id
-	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
-		fmt.Printf("MessageId HelloReply server's != My MessageId Hello send\n")
-		// TODO Heandler
-		return nil
-	}
-	fmt.Printf("idMessage %v\n", bufRes[0:4])
-	fmt.Printf("typeMess  %v\n", bufRes[4:5])
-	fmt.Printf("lenMess   %v\n", bufRes[5:7])
-	fmt.Printf("response + sign  %v\n\n", string(bufRes[7:l]))
-
-	// check type
-	if isCanceled {
-		if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
-			fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
-			return err
-		}
-	} else {
-		if CheckTypeEquality(byte(HELLO), bufRes) == -1 {
-			fmt.Printf("sendHello: Not HELLO was recieved\n")
-			return err
-		}
-	}
-
-	isCanceled = false
-	return err
-}
-
-// Compose UDP handshake message (with a peer or server) and convert it to binary
-func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes int) []byte {
-
-	var buf bytes.Buffer
-
-	i := make([]byte, 4)
-	binary.BigEndian.PutUint32(i, idMes)
-	buf.Write(i)
-
-	buf.WriteByte(typeMes)
-
-	j := make([]byte, 2)
-	binary.BigEndian.PutUint16(j, uint16(lenMes))
-	buf.Write(j)
-
-	k := make([]byte, 4)
-	binary.BigEndian.PutUint32(k, uint32(extentMes))
-	buf.Write(k)
-
-	buf.WriteString(name)
-	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
-
-	return buf.Bytes()
-}
-
-func composeGetDatumMessage(idMes uint32, typeMes uint8, lenMes int, hash []byte, extentMes int) []byte {
-
-	var buf bytes.Buffer
-
-	i := make([]byte, 4)
-	binary.BigEndian.PutUint32(i, idMes)
-	buf.Write(i)
-
-	buf.WriteByte(typeMes)
-
-	j := make([]byte, 2)
-	binary.BigEndian.PutUint16(j, uint16(lenMes))
-	buf.Write(j)
-
-	buf.Write(hash)
-
-	k := make([]byte, 4)
-	binary.BigEndian.PutUint32(k, uint32(extentMes))
-	buf.Write(k)
-
-	buf.WriteString(name)
-	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
-
-	return buf.Bytes()
-}
-
-// Composes UDP message to send data and converts it to binary
-func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes string) []byte {
-
-	var buf bytes.Buffer
-
-	i := make([]byte, 4)
-	binary.BigEndian.PutUint32(i, idMes)
-	buf.Write(i)
-
-	buf.WriteByte(typeMes)
-
-	j := make([]byte, 2)
-	binary.BigEndian.PutUint16(j, uint16(lenMes))
-	buf.Write(j)
-
-	hash := sha256.Sum256([]byte(valueMes))
-	buf.Write(hash[:])
-
-	buf.WriteString(valueMes)
-	fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
-
-	return buf.Bytes()
-}
+// ==========================   Auxiliary TCP functions ========================== //
 
 func SendGetRequest(tcpClient *http.Client, ReqUrl string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", ReqUrl, nil)
@@ -365,7 +174,7 @@ func SendGetRequest(tcpClient *http.Client, ReqUrl string) (*http.Response, erro
 // Get peers' names
 func GetPeers(tcpClient *http.Client) []string {
 	res, err := SendGetRequest(tcpClient, url+"/peers/")
-	HandlePanicError(err, "GetPeers failure")
+	HandlePanicError(err, "GetPeers: Get failure")
 	if err != nil {
 		return nil
 	}
@@ -385,7 +194,7 @@ func GetPeers(tcpClient *http.Client) []string {
 		res.Body.Close()
 		return peersNames
 	} else {
-		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
+		fmt.Printf("GetPeers: GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
 		res.Body.Close()
 		return nil
 	}
@@ -397,13 +206,13 @@ func GetPeers(tcpClient *http.Client) []string {
 // - 404 if peer is not known.
 func PeerAddr(tcpClient *http.Client, peer string) []string {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/addresses")
-	HandlePanicError(err, "PeerAddr failure")
+	HandlePanicError(err, "PeerAddr: Get failure")
 	if err != nil {
 		return nil
 	}
 
 	if res.StatusCode == 404 {
-		fmt.Printf("Peer %s is unknown\n", peer)
+		fmt.Printf("PeerAddr: Peer %s is unknown\n", peer)
 		return nil
 	} else {
 		var peerNames []string
@@ -429,7 +238,7 @@ func PeerAddr(tcpClient *http.Client, peer string) []string {
 // - 404 if the peer is not known.
 func PeerKey(tcpClient *http.Client, peer string) []byte {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/key")
-	HandlePanicError(err, "PeerKey failure")
+	HandlePanicError(err, "PeerKey: Get failure")
 	if err != nil {
 		return nil
 	}
@@ -441,13 +250,13 @@ func PeerKey(tcpClient *http.Client, peer string) []byte {
 		res.Body.Close()
 		return key
 	case 404:
-		fmt.Printf("Peer %s is unknown\n", peer)
+		fmt.Printf("PeerKey: Peer %s is unknown\n", peer)
 		return nil
 	case 204:
-		fmt.Printf("Peer %s is known, but has not announced public key\n", peer)
+		fmt.Printf("PeerKey: Peer %s is known, but has not announced public key\n", peer)
 		return nil
 	default:
-		fmt.Printf("Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
+		fmt.Printf("PeerKey: Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
 		return nil
 	}
 }
@@ -460,7 +269,7 @@ func PeerKey(tcpClient *http.Client, peer string) []byte {
 
 func PeerRoot(tcpClient *http.Client, peer string) []byte {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/root")
-	HandlePanicError(err, "PeerKey failure")
+	HandlePanicError(err, "PeerKey: Get failure")
 	if err != nil {
 		return nil
 	}
@@ -472,14 +281,206 @@ func PeerRoot(tcpClient *http.Client, peer string) []byte {
 		res.Body.Close()
 		return root
 	case 404:
-		fmt.Printf("Peer %s is unknown\n", peer)
+		fmt.Printf("PeerRoot: Peer %s is unknown\n", peer)
 		return nil
 	case 204:
-		fmt.Printf("Peer %s is known, but has not announced public key\n", peer)
+		fmt.Printf("PeerRoot: Peer %s is known, but has not announced public key\n", peer)
 		return nil
 	default:
-		fmt.Printf("Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
+		fmt.Printf("PeerRoot: Unexpected StatusCode %d for peer %s \n", res.StatusCode, peer)
+		return nil
+	}
+}
+
+// ==========================   Auxiliary UDP functions ========================== //
+
+// Compose UDP handshake message (with a peer or server) and convert it to binary
+func composeHandChakeMessage(idMes uint32, typeMes uint8, lenMes int, extentMes int) []byte {
+
+	var buf bytes.Buffer
+
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
+
+	buf.WriteByte(typeMes)
+
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
+
+	k := make([]byte, 4)
+	binary.BigEndian.PutUint32(k, uint32(extentMes))
+	buf.Write(k)
+
+	buf.WriteString(name)
+	//fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+// Compose UDP message GetDatum and convert it to binary
+func composeGetDatumMessage(idMes uint32, typeMes uint8, lenMes int, hash []byte, extentMes int) []byte {
+
+	var buf bytes.Buffer
+
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
+
+	buf.WriteByte(typeMes)
+
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
+
+	buf.Write(hash)
+
+	k := make([]byte, 4)
+	binary.BigEndian.PutUint32(k, uint32(extentMes))
+	buf.Write(k)
+
+	buf.WriteString(name)
+	//fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+// Composes UDP message to send data and converts it to binary
+func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes string) []byte {
+
+	var buf bytes.Buffer
+
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
+
+	buf.WriteByte(typeMes)
+
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
+
+	hash := sha256.Sum256([]byte(valueMes))
+	buf.Write(hash[:])
+
+	buf.WriteString(valueMes)
+	//fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+// Send "Hello" & Recieve "HelloReply"
+func sendHello(conn *net.UDPConn) error {
+	// send Hello
+	buf := composeHandChakeMessage(messCounter, byte(HELLO), len(name)+4, 0)
+	_, err := conn.Write(buf)
+	if err != nil {
+		log.Panic("sendHello: Write to UDP failure\n")
+		return err
+	}
+
+	//recieve HelloReply
+	bufRes := make([]byte, DATAGRAM_SIZE)
+	l, _, err := conn.ReadFromUDP(bufRes)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("sendHello: ReadFromUDP error %v\n", err)
+			return err
+		}
+	}
+
+	// check id
+	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
+		fmt.Printf("sendHello: MessageId HelloReply != MessageId Hello\n")
+		// TODO Heandler
+		return nil
+	}
+	fmt.Printf("idMessage %v\n", bufRes[0:4])
+	fmt.Printf("typeMess  %v\n", bufRes[4:5])
+	fmt.Printf("lenMess   %v\n", bufRes[5:7])
+	fmt.Printf("response + sign  %v\n\n", string(bufRes[7:l]))
+
+	// check type
+	if isCanceled {
+		if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
+			fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
+			return err
+		}
+	} else {
+		if CheckTypeEquality(byte(HELLO), bufRes) == -1 {
+			fmt.Printf("sendHello: Not HELLO was recieved\n")
+			return err
+		}
+	}
+
+	isCanceled = false
+	return err
+}
+
+// Send "GetDatum" & Recieve "Datum"
+func GetDataByHash(conn *net.UDPConn, hash []byte) []byte {
+	// send GetDatum
+	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), 32, hash, 0)
+	_, err := conn.Write(buf)
+	if err != nil {
+		log.Panic("GetDataByHash: Write to UDP failure\n")
 		return nil
 	}
 
+	//recieve Datum
+	bufRes := make([]byte, DATAGRAM_SIZE)
+	all, _, err := conn.ReadFromUDP(bufRes)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("GetDataByHash: ReadFromUDP error %v\n", err)
+			return nil
+		}
+	}
+
+	// check id
+	if binary.BigEndian.Uint32(bufRes[:4]) != messCounter {
+		fmt.Printf("GetDataByHash: MessageId DATUM != MessageId GET_DATUM\n")
+		// TODO Heandler
+		return nil
+	}
+
+	// check type
+	if CheckTypeEquality(byte(DATUM), bufRes) == -1 {
+		if CheckTypeEquality(byte(NO_DATUM), bufRes) == -1 {
+			fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
+			return nil
+		} else {
+			fmt.Printf("GetDataByHash: NO_DATUM was received\n")
+			return nil
+		}
+	}
+
+	fmt.Printf("Was recieved %d bytes at all\n", all)
+
+	lenValue := binary.BigEndian.Uint16(bufRes[5:7]) - 32
+
+	// Check hash 1 : if hash in GetDatum == hash in DATUM
+	for i := 0; i < 32; i++ {
+		if bufRes[7+i] != hash[i] {
+			PanicMessage("GetDataByHash: Data substitution !!! The hash I received is not the one I asked for\n")
+			return nil
+		}
+	}
+
+	value := bufRes[39:(39 + lenValue)]
+
+	// Check hash 2 : if hash in DATUM is really hash of value (there was no value substitution)
+	hashedValue := sha256.Sum256(value)
+
+	for i := 0; i < 32; i++ {
+		if hashedValue[i] != hash[i] {
+			PanicMessage("GetDataByHash: Data substitution !!! The hash(value) does not match the one I asked for\n")
+			return nil
+		}
+	}
+
+	messCounter++
+
+	return value
 }
