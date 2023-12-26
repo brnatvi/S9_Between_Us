@@ -28,7 +28,11 @@ func HandlePanicError(err error, msg string) {
 }
 
 func PanicMessage(msg string) {
-	log.Panic(msg, " : ", string(colorPurple), string(colorReset))
+	log.Panic(string(colorPurple), msg, string(colorReset))
+}
+
+func UnexpectedMessage(msg string) {
+	log.Panic(string(colorYellow), msg, string(colorReset))
 }
 
 func HandleFatalError(err error, msg string) {

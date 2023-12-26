@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 const TIMEOUT = 5 * time.Second
 
 func main() {
+
+	myPeer := os.Args[1]
 
 	// TODO initialisation from config
 
@@ -45,7 +48,7 @@ func main() {
 	moduls.HandleFatalError(err, "DialUDP failure")
 
 	// Register on Server
-	servPublicKey = moduls.RegistrationOnServer(conn)
+	servPublicKey = moduls.RegistrationOnServer(conn, myPeer)
 
 	// Get peers' addresses
 	peersNames := moduls.GetPeers(client)
@@ -71,8 +74,7 @@ func main() {
 	fmt.Printf("peer root : %v \n", rootPeerServ)
 	fmt.Printf("peer key : %v \n", servPublicKey)
 
-	value := moduls.GetDataByHash(conn, rootPeerServ)
-	fmt.Printf("\nvalue : %v \n", value)
+	GetData(conn, rootPeerServ, myPeer)
 
 	//go moduls.MaintainConnectionServer(conn)
 
@@ -172,5 +174,39 @@ func GetServerAdresses(tcpClient *http.Client) []string {
 	} else {
 		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
 		return nil
+	}
+}
+
+func GetData(conn *net.UDPConn, rootPeer []byte, myPeer string) {
+	value := moduls.GetDataByHash(conn, rootPeer, myPeer)
+
+	if len(value) != 0 {
+		fmt.Printf("\nvalue : %v \n", value)
+
+		var listContent []moduls.StrObject
+		listContent = moduls.ParceValue(value)
+
+		for _, el := range listContent {
+
+			if el.Type == moduls.CHUNK {
+				fmt.Printf("Chunk :\n %v", el.Data)
+
+			} else if el.Type == moduls.BIG_FILE {
+				// call for each hash
+				point := 0
+				for i := 0; i < el.NbHash; i++ {
+					GetData(conn, el.Hash[point:point+32], myPeer)
+					point = point + 32
+				}
+
+			} else if el.Type == -1 {
+				// call recursive
+				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
+				GetData(conn, el.Hash, myPeer)
+
+			} else {
+				// do nothing
+			}
+		}
 	}
 }
