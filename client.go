@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -81,7 +83,7 @@ func main() {
 	fmt.Printf("peer root : %v \n", rootPeerServ)
 	fmt.Printf("peer key : %v \n", servPublicKey)
 
-	GetData(conn, rootPeerServ, myPeer)
+	GetData(conn, rootPeerServ, myPeer, "", "")
 
 	//go moduls.MaintainConnectionServer(conn)
 
@@ -221,36 +223,95 @@ func GetServerAdresses(tcpClient *http.Client) []string {
 	}
 }
 
-func GetData(conn *net.UDPConn, rootPeer []byte, myPeer string) {
+func GetData(conn *net.UDPConn, rootPeer []byte, myPeer string, nameData string, parentName string) {
+
+	var path string
+	if nameData == "" {
+		p, _ := os.Getwd()
+		path = filepath.Join(p, "Recieved_Data")
+
+		// create folder if it not exist
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			os.Mkdir(path, 0777)
+		}
+	} else {
+		path = filepath.Join(parentName, nameData)
+	}
+
 	value := moduls.GetDataByHash(conn, rootPeer, myPeer)
 
 	if len(value) != 0 {
 		fmt.Printf("\nvalue : %v \n", value)
 
+		// Parcing the value recieved
 		var listContent []moduls.StrObject
 		listContent = moduls.ParceValue(value)
 
+		// Create the files and directories
 		for _, el := range listContent {
 
 			if el.Type == moduls.CHUNK {
-				fmt.Printf("Chunk :\n %v", el.Data)
+				createFile(path, el.Data)
+				return
 
 			} else if el.Type == moduls.BIG_FILE {
-				// call for each hash
 				point := 0
+				var bufer []byte
+
+				// The ParceValue function brought together all the hashes of a large file
+				// So to receive data, we need to send requests for each 32 byte pieces:
 				for i := 0; i < el.NbHash; i++ {
-					GetData(conn, el.Hash[point:point+32], myPeer)
+					val := moduls.GetDataByHash(conn, el.Hash[point:point+32], myPeer)
+					bufer = append(bufer, val...)
 					point = point + 32
 				}
 
+				createFile(path, bufer)
+				return
+
 			} else if el.Type == -1 {
-				// call recursive
+
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					os.Mkdir(path, 0777)
+				}
 				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
-				GetData(conn, el.Hash, myPeer)
+
+				// call recursive
+				GetData(conn, el.Hash, myPeer, el.Name, path)
 
 			} else {
 				// do nothing
 			}
 		}
 	}
+}
+
+func createFile(filePath string, data []byte) error {
+
+	fmt.Printf("Path : %s\n", filePath)
+
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+
+	fmt.Println("Here1")
+
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	fmt.Println("Here2")
+
+	if _, err = file.Write(data); err != nil {
+		file.Close()
+		log.Fatal(err)
+		return err
+	}
+
+	fmt.Println("Here3")
+
+	if err = file.Close(); err != nil {
+		log.Fatal(err)
+		return err
+	}
+	return nil
 }

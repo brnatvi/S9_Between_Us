@@ -559,7 +559,16 @@ func ParceValue(data []byte) []StrObject {
 		// Directory contains a list of elements of the forme: name(32 bytes) + hash(32 bytes)
 		for point < l {
 			var newObj StrObject
-			newObj.Name = string(data[point:(point + 32)])
+			var binName []byte
+
+			binNameZero := data[point:(point + 32)]
+
+			for _, b := range binNameZero {
+				if b != byte(0) {
+					binName = append(binName, b)
+				}
+			}
+			newObj.Name = string(binName)
 			point = point + 32
 			newObj.Hash = data[point:(point + 32)]
 			point = point + 32
