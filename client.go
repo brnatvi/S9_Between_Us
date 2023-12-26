@@ -22,8 +22,6 @@ func main() {
 
 	myPeer := os.Args[1]
 
-	myPeer := os.Args[1]
-
 	// init params and create merkel tree
 	name, port, dirPath := readConfig("config")
 
