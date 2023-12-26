@@ -22,7 +22,16 @@ func main() {
 
 	myPeer := os.Args[1]
 
-	// TODO initialisation from config
+	myPeer := os.Args[1]
+
+	// init params and create merkel tree
+	name, port, dirPath := readConfig("config")
+
+	var root moduls.Node
+
+	if len(dirPath) != 0 {
+		root = moduls.Merkelify(dirPath)
+	}
 
 	// addresses of server and peers
 	var peersAdresses []string
@@ -80,6 +89,43 @@ func main() {
 
 	//	reader := bufio.NewReader(os.Stdin)
 	//	menu(reader, client)
+}
+
+// name says it all
+func readConfig(filename string) (name string, port string, dirPath string) {
+
+	name, port, dirPath = "", "", ""
+
+	file, err := os.Open(filename)
+	moduls.HandlePanicError(err, "error opening config file")
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		splitLine := strings.Split(line, "=")
+
+		if len(splitLine) != 2 {
+			continue
+		}
+
+		switch splitLine[0] {
+
+		case "name":
+			name = splitLine[1]
+		case "port":
+			port = splitLine[1]
+		case "path":
+			dirPath = splitLine[1]
+
+		}
+	}
+
+	if len(name) == 0 || len(port) == 0 {
+		moduls.PanicMessage("missing params in config file")
+	}
+
+	return name, port, dirPath
 }
 
 func menu(reader *bufio.Reader, client *http.Client) {
