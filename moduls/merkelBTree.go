@@ -8,15 +8,15 @@ import (
 	gopath "path"
 )
 
-type node struct {
+type Node struct {
 	name     string
 	offset   int64
 	hash     []byte
-	children []node
+	children []Node
 }
 
 // TODO directory/file ==> merkel tree
-func merkelify(path string) (root node) {
+func Merkelify(path string) (root Node) {
 	info, err := os.Stat(path)
 	HandlePanicError(err, "os.stat error, merkelify")
 
@@ -28,8 +28,8 @@ func merkelify(path string) (root node) {
 }
 
 // PS: this only includes the first 16 items in the directory
-func hashDir(path string) node {
-	var child node
+func hashDir(path string) Node {
+	var child Node
 	dir, err := os.ReadDir(path)
 	HandlePanicError(err, "os.readdir err, hashDir")
 
@@ -37,7 +37,7 @@ func hashDir(path string) node {
 	if len(dir) == 0 {
 		cHash := sha256.New()
 		cHash.Write([]byte(path))
-		child = node{
+		child = Node{
 			name: gopath.Base(path),
 			hash: cHash.Sum(nil),
 		}
@@ -60,10 +60,10 @@ func hashDir(path string) node {
 	return child
 }
 
-func hashFile(path string) node {
+func hashFile(path string) Node {
 
 	// child to be returned
-	var child node
+	var child Node
 
 	file, err := os.Open(path)
 	HandleFatalError(err, "error opening file "+path)
@@ -71,12 +71,12 @@ func hashFile(path string) node {
 
 	// making the hashes
 	chunk := make([]byte, CHUNK_SIZE)
-	var nodes []node
+	var nodes []Node
 
 	// hash entire file and create nodes
 	var i int64
 	for {
-		node := node{
+		Node := Node{
 			name:     fmt.Sprintf("/leaf%d", i),
 			children: nil,
 			offset:   i * CHUNK_SIZE,
@@ -90,8 +90,8 @@ func hashFile(path string) node {
 
 		tempHash := sha256.New()
 		tempHash.Write(chunk[:n])
-		node.hash = tempHash.Sum(nil)
-		nodes = append(nodes, node)
+		Node.hash = tempHash.Sum(nil)
+		nodes = append(nodes, Node)
 	}
 
 	child = makeBTree(nodes)
@@ -100,18 +100,18 @@ func hashFile(path string) node {
 }
 
 // we are required to provide sources on code so for this one i did ask a friend for some help here (Mr. Scruff), just hints, not actual code
-func makeBTree(sortedNodes []node) node {
+func makeBTree(sortedNodes []Node) Node {
 	if len(sortedNodes) == 0 {
-		return node{}
+		return Node{}
 	}
 
-	// leaf node
+	// leaf Node
 	if len(sortedNodes) <= MAX_CHILDREN {
-		return node{children: sortedNodes}
+		return Node{children: sortedNodes}
 	}
 
-	// internal node
-	var internalNode node
+	// internal Node
+	var internalNode Node
 	internalNode.name = "/InternalNode"
 	internalNode.hash = calculateNodeHash(sortedNodes)
 
@@ -132,7 +132,7 @@ func makeBTree(sortedNodes []node) node {
 }
 
 // to get the children's hash
-func calculateNodeHash(nodes []node) []byte {
+func calculateNodeHash(nodes []Node) []byte {
 	hash := sha256.New()
 	for _, n := range nodes {
 		hash.Write(n.hash)
