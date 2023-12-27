@@ -5,11 +5,9 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,7 +32,6 @@ func main() {
 	}
 
 	// addresses of server and peers
-	var peersAdresses []string
 	var servAdresses []string
 	var servPublicKey []byte
 
@@ -59,33 +56,15 @@ func main() {
 	// Register on Server
 	servPublicKey = moduls.RegistrationOnServer(conn, myPeer)
 
-	// Get peers' addresses
-	peersNames := moduls.GetPeers(client)
-
-	if peersNames != nil {
-		for ind, name := range peersNames {
-			peerAddr := moduls.PeerAddr(client, name)
-			if peerAddr != nil {
-				for _, ad := range peerAddr {
-					peersAdresses = append(peersAdresses, ad)
-					fmt.Printf("%d peer : %s  has adresse : %s \n", ind, name, ad)
-				}
-			}
-		}
-		fmt.Println("")
-	} else {
-		fmt.Printf("Has not peers \n")
-	}
-
 	rootPeerServ := moduls.PeerRoot(client, "jch.irif.fr")
 	//keyPeerServ := moduls.PeerKey(client, "jch.irif.fr")		// doesn't return a key
 
 	fmt.Printf("peer root : %v \n", rootPeerServ)
 	fmt.Printf("peer key : %v \n", servPublicKey)
 
-	GetData(conn, rootPeerServ, myPeer, "", "")
+	//	moduls.GetData(conn, rootPeerServ, myPeer, "", "")
 
-	//go moduls.MaintainConnectionServer(conn)
+	moduls.MaintainConnectionServer(conn, myPeer)
 
 	//	reader := bufio.NewReader(os.Stdin)
 	//	menu(reader, client)
@@ -152,7 +131,7 @@ Options:
 		command, peer := parseCmd(cmd)
 		switch command {
 		case 0:
-			moduls.GetPeers(client)
+			moduls.GetAllPeersAdresses(client)
 			moduls.DebugPrint("get peers")
 		case 1:
 			moduls.PeerAddr(client, peer)
@@ -164,7 +143,7 @@ Options:
 			moduls.PeerRoot(client, peer)
 			moduls.DebugPrint("root")
 		case 4:
-			moduls.GetData(peer)
+			//	moduls.GetData(peer)
 			moduls.DebugPrint("data")
 		case 5:
 			return
@@ -221,97 +200,4 @@ func GetServerAdresses(tcpClient *http.Client) []string {
 		fmt.Printf("GetRequest of servers' addresses returned with StatusCode = %d\n", res.StatusCode)
 		return nil
 	}
-}
-
-func GetData(conn *net.UDPConn, rootPeer []byte, myPeer string, nameData string, parentName string) {
-
-	var path string
-	if nameData == "" {
-		p, _ := os.Getwd()
-		path = filepath.Join(p, "Recieved_Data")
-
-		// create folder if it not exist
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.Mkdir(path, 0777)
-		}
-	} else {
-		path = filepath.Join(parentName, nameData)
-	}
-
-	value := moduls.GetDataByHash(conn, rootPeer, myPeer)
-
-	if len(value) != 0 {
-		fmt.Printf("\nvalue : %v \n", value)
-
-		// Parcing the value recieved
-		var listContent []moduls.StrObject
-		listContent = moduls.ParceValue(value)
-
-		// Create the files and directories
-		for _, el := range listContent {
-
-			if el.Type == moduls.CHUNK {
-				createFile(path, el.Data)
-				return
-
-			} else if el.Type == moduls.BIG_FILE {
-				point := 0
-				var bufer []byte
-
-				// The ParceValue function brought together all the hashes of a large file
-				// So to receive data, we need to send requests for each 32 byte pieces:
-				for i := 0; i < el.NbHash; i++ {
-					val := moduls.GetDataByHash(conn, el.Hash[point:point+32], myPeer)
-					bufer = append(bufer, val...)
-					point = point + 32
-				}
-
-				createFile(path, bufer)
-				return
-
-			} else if el.Type == -1 {
-
-				if _, err := os.Stat(path); os.IsNotExist(err) {
-					os.Mkdir(path, 0777)
-				}
-				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
-
-				// call recursive
-				GetData(conn, el.Hash, myPeer, el.Name, path)
-
-			} else {
-				// do nothing
-			}
-		}
-	}
-}
-
-func createFile(filePath string, data []byte) error {
-
-	fmt.Printf("Path : %s\n", filePath)
-
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-
-	fmt.Println("Here1")
-
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
-	fmt.Println("Here2")
-
-	if _, err = file.Write(data); err != nil {
-		file.Close()
-		log.Fatal(err)
-		return err
-	}
-
-	fmt.Println("Here3")
-
-	if err = file.Close(); err != nil {
-		log.Fatal(err)
-		return err
-	}
-	return nil
 }

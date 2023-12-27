@@ -9,26 +9,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
-
-type StrObject struct {
-	Type   int
-	Name   string
-	NbHash int
-	Hash   []byte
-	Data   []byte
-}
-
-// TODO get from debug
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
 
 var messCounter uint32 = 1
-
-//const name string = "5miles"
 
 const CHUNK_SIZE = 1024    // (bytes)
 const DATAGRAM_SIZE = 2048 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
@@ -63,30 +53,36 @@ const (
 	MAX_CHILDREN = 32 // 32
 )
 
+// Structure for temporary storage of data downloaded from hash (chunks, big_files or directories)
+type StrObject struct {
+	Type   int    // can be CHUNK, BIG_FILE or -1 for all content of DIRECTORY (because the type of data is unknown yet)
+	Name   string // "" for CHUNK and BIG_FILE
+	NbHash int    // number of hashes, 1 for CHUNK and content of DIRECTORY, > 1 for BIG_FILE
+	Hash   []byte // hash of data
+	Data   []byte // data, nil for BIG_FILE and content of DIRECTORY
+}
+
 // ==========================   Main functions ========================== //
 
 // getDatum req
-func GetData(peer string) {
-	// TODO write to local file
-}
+//func GetData(peer string) {
+//	// TODO write to local file
+//}
 
 func SendData() {
 	// TODO send requested data func
 }
 
 // Register on the server
+// Parameters:
+// - conn - UDP Connection
+// - myPeer - name of my peer
+// Return: public key of Server
 func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 
-	isRecieved := false
-
 	// send Hello till reception HelloReply
-	for !isRecieved {
-		err := sendHello(conn, myPeer)
-		if err == nil {
-			isRecieved = true
-		} else {
-			time.Sleep(TIMEOUT)
-		}
+	for !sendHello(conn, myPeer) {
+		time.Sleep(TIMEOUT)
 	}
 
 	//recieve PublicKey
@@ -103,18 +99,17 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 	}
 
 	newMessId := binary.BigEndian.Uint32(buf[:4])
-	fmt.Printf("newMessId %d\n", newMessId)
 
 	ServerPublicKey := buf[7:l]
-	fmt.Printf("PublicKey : %v\n", ServerPublicKey)
 
 	// send PublicKeyReply
 	buf = composeHandChakeMessage(newMessId, byte(PUBLIC_KEY_REPLY), myPeer, 0, 0)
 	_, err = conn.Write(buf)
 	if err != nil {
-		log.Panic("PublicKeyReply: Write to UDP failure\n")
+		log.Panic("PublicKeyReply: Write PUBLIC_KEY_REPLY to UDP failure\n")
 		return nil
 	}
+	messCounter++
 
 	// recieve Root
 	buf = make([]byte, DATAGRAM_SIZE)
@@ -129,34 +124,36 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 		return nil
 	}
 	newMessId = binary.BigEndian.Uint32(buf[:4])
-	fmt.Printf("newMessId %d\n", newMessId)
 
 	// send Hash("")
 	if !hasRoot {
-		composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
+		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
 	} else {
 		// TODO
 	}
+
+	_, err = conn.Write(buf)
+	if err != nil {
+		log.Panic("PublicKeyReply: Write ROOT_REPLY to UDP failure\n")
+		return nil
+	}
 	messCounter++
+	isCanceled = false
 	return ServerPublicKey
 }
 
 // Maintain connection with server - sends messages every 30 seconds
 func MaintainConnectionServer(conn *net.UDPConn, myPeer string) {
 	for {
-		if isCanceled {
+		if !isCanceled {
 
-			err := sendHello(conn, myPeer)
-			HandlePanicError(err, "sendHello failure")
-			messCounter++
-
-			// TODO Handle absence of response
-
+			sendHello(conn, myPeer)
 			time.Sleep(30 * time.Second)
 
 		} else {
 			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
 			RegistrationOnServer(conn, myPeer)
+			time.Sleep(30 * time.Second)
 		}
 	}
 }
@@ -205,6 +202,7 @@ func GetPeers(tcpClient *http.Client) []string {
 // Obtaining the following status codes is possible:
 // - 200 if the peer is known, and then the body contains a list of UDP socket addresses, one per line;
 // - 404 if peer is not known.
+// Return: list of addresses of peer
 func PeerAddr(tcpClient *http.Client, peer string) []string {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/addresses")
 	HandlePanicError(err, "PeerAddr: Get failure")
@@ -232,11 +230,31 @@ func PeerAddr(tcpClient *http.Client, peer string) []string {
 	}
 }
 
+// Print all peer's names and adresses
+func GetAllPeersAdresses(tcpClient *http.Client) {
+	peersNames := GetPeers(tcpClient)
+	if peersNames != nil {
+		for ind, name := range peersNames {
+			peerAddr := PeerAddr(tcpClient, name)
+			if peerAddr != nil {
+				for _, ad := range peerAddr {
+					//	peersAdresses = append(peersAdresses, ad)
+					fmt.Printf("%d peer : %s  has adresse : %s \n", ind, name, ad)
+				}
+			}
+		}
+		fmt.Println("")
+	} else {
+		fmt.Printf("Has not peers \n")
+	}
+}
+
 // Get peer's key
 // Obtaining the following status codes is possible:
 // - 200 if the peer is known and has announced a public key, and then the body contains the key (a	sequence of 64 bytes);
 // - 204 if the peer is known, but has not announced a public key;
 // - 404 if the peer is not known.
+// Return: key of peer
 func PeerKey(tcpClient *http.Client, peer string) []byte {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/key")
 	HandlePanicError(err, "PeerKey: Get failure")
@@ -267,7 +285,7 @@ func PeerKey(tcpClient *http.Client, peer string) []byte {
 // - 200 if the peer is known and announced a root, and then the body contains the root hash (a sequence of 32 bytes);
 // - 204 if the peer is known, but has not announced a root to the server;
 // - 404 if the peer is not known.
-
+// Return: root of peer
 func PeerRoot(tcpClient *http.Client, peer string) []byte {
 	res, err := SendGetRequest(tcpClient, url+"/peers/"+peer+"/root")
 	HandlePanicError(err, "PeerKey: Get failure")
@@ -373,68 +391,88 @@ func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes st
 
 // Send "Hello" & Recieve "HelloReply"
 func sendHello(conn *net.UDPConn, myPeer string) error {
-	isRecieved := false
 
-	// send Hello
+	// send HELLO
 	buf := composeHandChakeMessage(messCounter, byte(HELLO), myPeer, len(myPeer)+4, 0)
 	_, err := conn.Write(buf)
 	if err != nil {
-		log.Panic("sendHello: Write to UDP failure\n")
-		return err
+		HandleFatalError(err, "sendHello: Write to UDP failure")
+		return error
 	}
 
 	bufRes := make([]byte, DATAGRAM_SIZE)
 	timeStart := time.Now()
 
-	// receive messages until a response with the required ID is received
-	for !isRecieved {
+	// try to receive HELLO_REPLY until a response HELLO_REPLY with the required ID will be received till TIMEOUT
+	for {
 
-		//recieve HelloReply
+		conn.SetReadDeadline(time.Now().Add(TIMEOUT))
+		//recieve HELLO_REPLY
 		l, _, err := conn.ReadFromUDP(bufRes)
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("sendHello: ReadFromUDP error %v\n", err)
-				return err
+				HandleFatalError(err, "sendHello: ReadFromUDP error")
+				messCounter++
+				return error
 			}
+		}
+
+		// check lenght
+		hasToBe := binary.BigEndian.Uint16(bufRes[5:7]) + 4 + 1 + 2 + 64
+		fmt.Println("\n---------------------")
+		fmt.Printf("readed    : %d\n", l)
+		fmt.Printf("has to be : %d\n", hasToBe)
+		fmt.Println("---------------------\n")
+
+		if hasToBe != uint16(l) {
+			PanicMessage("sendHello: The lenght of HELLO_REPLY recieved != expected one\n")
+			messCounter++
+			return false
 		}
 
 		// check id
-		if binary.BigEndian.Uint32(bufRes[:4]) == messCounter {
-			fmt.Printf("idMessage %v\n", bufRes[0:4])
-			fmt.Printf("typeMess  %v\n", bufRes[4:5])
-			fmt.Printf("lenMess   %v\n", bufRes[5:7])
-			fmt.Printf("response + sign  %v\n\n", string(bufRes[7:l]))
+		fmt.Println("\n---------------------")
+		fmt.Printf("HELLO       id : %v\n", messCounter)
+		fmt.Printf("HELLO_REPLY id : %v\n", binary.BigEndian.Uint32(bufRes[:4]))
 
-			isRecieved = true
+		fmt.Printf("idMessage %v\n", bufRes[0:4])
+		fmt.Printf("typeMess  %v\n", bufRes[4:5])
+		fmt.Printf("lenMess   %v\n", bufRes[5:7])
+		fmt.Printf("response  %v\n\n", string(bufRes[7:7+binary.BigEndian.Uint16(bufRes[5:7])]))
+
+		if binary.BigEndian.Uint32(bufRes[:4]) == messCounter {
+			// check type
+			if isCanceled {
+				if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
+					fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
+					messCounter++
+					return false
+				}
+			}
+
+			// good Id, good lenght, good type of message
+			break
+
 		} else {
-			fmt.Printf("sendHello: MessageId HelloReply != MessageId Hello\n")
+			fmt.Printf("sendHello: Id HELLO_REPLY != Id HELLO\n")
+			fmt.Println("---------------------\n")
+			messCounter++
+
 			timeNow := time.Now()
 
+			// if TIMEOUT -> exit from function to re-send HELLO
 			if timeStart.Sub(timeNow) >= TIMEOUT {
 				PanicMessage("sendHello: Timeout reception of HelloReply\n")
-				return err
+				return false
 			}
 		}
 	}
-
-	// check type
-	if isCanceled {
-		if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
-			fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
-			return err
-		}
-	} else {
-		if CheckTypeEquality(byte(HELLO), bufRes) == -1 {
-			fmt.Printf("sendHello: Not HELLO was recieved\n")
-			return err
-		}
-	}
-
-	isCanceled = false
-	return err
+	messCounter++
+	return true
 }
 
 // Send "GetDatum" & Recieve "Datum"
+// Return: list of strObjects
 func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) []byte {
 
 	isRecieved := false
@@ -517,6 +555,10 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) []byte {
 	return nil
 }
 
+// Parser for data obtained by hash.
+// (See the principles of filling the structure above, in the description of the structure)
+// Parameter: binary array to parce
+// Returns: a list of StrObjects whose length = 1 for CHUNK and BIG_FILE, >=1 for DIRECTORY
 func ParceValue(data []byte) []StrObject {
 
 	var listContent []StrObject
@@ -532,7 +574,7 @@ func ParceValue(data []byte) []StrObject {
 		var newObj StrObject
 		newObj.Type = CHUNK
 		newObj.Name = ""
-		newObj.NbHash = 0
+		newObj.NbHash = 1
 		newObj.Data = data[point:l]
 
 		listContent = append(listContent, newObj)
@@ -544,6 +586,7 @@ func ParceValue(data []byte) []StrObject {
 		newObj.Name = ""
 		newObj.Data = nil
 
+		// Bring together all the hashes of a large file
 		c := 1
 		for c <= 32 {
 			newObj.Hash = append(newObj.Hash, data[point:(point+32)]...)
@@ -585,4 +628,98 @@ func ParceValue(data []byte) []StrObject {
 		fmt.Printf("ParceValue: Unexpected type of data recieved\n")
 		return nil
 	}
+}
+
+// Download data from hash and create directory structure (files and folders)
+// Recursive function ! Used to download data to the depth of the directory structure.
+// So, the first call is made with arguments  nameData = "" and parentName = ""
+// Parameters:
+// - conn - UDP Connection
+// - hashPeer - hash of peer
+// - myPeer - name of my peer
+// - nameData - name of the file or folder whose data will be downloaded by hash
+// - parentName - name of folder containing nameData
+func GetData(conn *net.UDPConn, hashPeer []byte, myPeer string, nameData string, parentName string) {
+
+	var path string
+	if nameData == "" {
+		p, _ := os.Getwd()
+		path = filepath.Join(p, "Recieved_Data")
+
+		// create folder if it not exist
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			os.Mkdir(path, 0777)
+		}
+	} else {
+		path = filepath.Join(parentName, nameData)
+	}
+
+	value := GetDataByHash(conn, hashPeer, myPeer)
+
+	if len(value) != 0 {
+		fmt.Printf("\nvalue : %v \n", value)
+
+		// Parcing the value recieved
+		var listContent []StrObject
+		listContent = ParceValue(value)
+
+		// Create the files and directories
+		for _, el := range listContent {
+
+			if el.Type == CHUNK {
+				CreateFile(path, el.Data)
+				return
+
+			} else if el.Type == BIG_FILE {
+				point := 0
+				var bufer []byte
+
+				// The ParceValue function brought together all the hashes of a large file
+				// So to receive data, we need to send requests for each 32 byte pieces:
+				for i := 0; i < el.NbHash; i++ {
+					val := GetDataByHash(conn, el.Hash[point:point+32], myPeer)
+					bufer = append(bufer, val...)
+					point = point + 32
+				}
+
+				CreateFile(path, bufer)
+				return
+
+			} else if el.Type == -1 {
+
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					os.Mkdir(path, 0777)
+				}
+				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
+
+				// recursive call
+				GetData(conn, el.Hash, myPeer, el.Name, path)
+
+			} else {
+				// do nothing
+			}
+		}
+	}
+}
+
+// Create file by filePath & Write data to it
+func CreateFile(filePath string, data []byte) error {
+
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	if _, err = file.Write(data); err != nil {
+		file.Close()
+		log.Fatal(err)
+		return err
+	}
+
+	if err = file.Close(); err != nil {
+		log.Fatal(err)
+		return err
+	}
+	return nil
 }
