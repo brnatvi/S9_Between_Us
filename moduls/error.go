@@ -50,7 +50,7 @@ func DebugPrint(msg interface{}) {
 func CheckTypeEquality(wantedType byte, recieved []byte) int {
 	if recieved[4:5][0] != wantedType {
 		len := binary.BigEndian.Uint16(recieved[5:7])
-		log.Printf("%s Not a %d was recieved, but %d. Error message: %v %s\n\n", string(colorYellow), wantedType, recieved[4:5][0], string(recieved[7:(7+len)]), string(colorReset))
+		log.Printf("%s Not a %d was recieved, but %d. Message: %v %s\n\n", string(colorYellow), wantedType, recieved[4:5][0], string(recieved[7:(7+len)]), string(colorReset))
 		return -1
 	}
 	return 0

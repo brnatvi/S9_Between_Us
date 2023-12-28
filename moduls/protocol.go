@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -80,9 +81,19 @@ func SendData() {
 // Return: public key of Server
 func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 
-	// send Hello till reception HelloReply
-	for !sendHello(conn, myPeer) {
-		time.Sleep(TIMEOUT)
+	// send Hello till reception of good HelloReply
+	for {
+		b, err := sendHello(conn, myPeer)
+		HandlePanicError(err, "RegistrationOnServer")
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			PanicMessage("The respondent has stopped sending messages to your address. You need to restart registration\n")
+			return nil
+		}
+		if b {
+			break
+		} else { // Another attempts to re-send HELLO after 5 sec
+			time.Sleep(TIMEOUT)
+		}
 	}
 
 	//recieve PublicKey
@@ -123,6 +134,7 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 	if CheckTypeEquality(byte(ROOT), buf) == -1 {
 		return nil
 	}
+
 	newMessId = binary.BigEndian.Uint32(buf[:4])
 
 	// send Hash("")
@@ -145,10 +157,23 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 // Maintain connection with server - sends messages every 30 seconds
 func MaintainConnectionServer(conn *net.UDPConn, myPeer string) {
 	for {
-		if !isCanceled {
+		timeStart := time.Now()
 
-			sendHello(conn, myPeer)
-			time.Sleep(30 * time.Second)
+		if !isCanceled {
+			_, err := sendHello(conn, myPeer)
+			HandlePanicError(err, "MaintainConnectionServer")
+
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				PanicMessage("The respondent has stopped sending messages to your address. You need to restart registration\n")
+			}
+			timeNow := time.Now()
+
+			if timeStart.Sub(timeNow) >= 180*time.Second {
+				isCanceled = true
+				continue
+			} else {
+				time.Sleep(30 * time.Second)
+			}
 
 		} else {
 			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
@@ -390,14 +415,14 @@ func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes st
 }
 
 // Send "Hello" & Recieve "HelloReply"
-func sendHello(conn *net.UDPConn, myPeer string) error {
+func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 
 	// send HELLO
 	buf := composeHandChakeMessage(messCounter, byte(HELLO), myPeer, len(myPeer)+4, 0)
 	_, err := conn.Write(buf)
 	if err != nil {
 		HandleFatalError(err, "sendHello: Write to UDP failure")
-		return error
+		return false, err
 	}
 
 	bufRes := make([]byte, DATAGRAM_SIZE)
@@ -405,70 +430,91 @@ func sendHello(conn *net.UDPConn, myPeer string) error {
 
 	// try to receive HELLO_REPLY until a response HELLO_REPLY with the required ID will be received till TIMEOUT
 	for {
+		conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
 
-		conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 		//recieve HELLO_REPLY
 		l, _, err := conn.ReadFromUDP(bufRes)
 		if err != nil {
 			if err != io.EOF {
-				HandleFatalError(err, "sendHello: ReadFromUDP error")
+				//	HandleFatalError(err, "sendHello: ReadFromUDP error")
 				messCounter++
-				return error
+				return false, err
 			}
 		}
 
-		// check lenght
-		hasToBe := binary.BigEndian.Uint16(bufRes[5:7]) + 4 + 1 + 2 + 64
-		fmt.Println("\n---------------------")
-		fmt.Printf("readed    : %d\n", l)
-		fmt.Printf("has to be : %d\n", hasToBe)
-		fmt.Println("---------------------\n")
-
-		if hasToBe != uint16(l) {
-			PanicMessage("sendHello: The lenght of HELLO_REPLY recieved != expected one\n")
+		bExit := false
+		rezCheck := CheckUDPIncomingPacket(bufRes, l, HELLO_REPLY, "HELLO_REPLY")
+		switch rezCheck {
+		case 0:
+			bExit = true
+		case 1: // exit from function to re-send HELLO
 			messCounter++
-			return false
-		}
+			return false, errors.New("sendHello: The lenght of HELLO_REPLY recieved != expected one")
 
-		// check id
-		fmt.Println("\n---------------------")
-		fmt.Printf("HELLO       id : %v\n", messCounter)
-		fmt.Printf("HELLO_REPLY id : %v\n", binary.BigEndian.Uint32(bufRes[:4]))
-
-		fmt.Printf("idMessage %v\n", bufRes[0:4])
-		fmt.Printf("typeMess  %v\n", bufRes[4:5])
-		fmt.Printf("lenMess   %v\n", bufRes[5:7])
-		fmt.Printf("response  %v\n\n", string(bufRes[7:7+binary.BigEndian.Uint16(bufRes[5:7])]))
-
-		if binary.BigEndian.Uint32(bufRes[:4]) == messCounter {
-			// check type
-			if isCanceled {
-				if CheckTypeEquality(byte(HELLO_REPLY), bufRes) == -1 {
-					fmt.Printf("sendHello: Not HELLO_REPLY was recieved\n")
-					messCounter++
-					return false
-				}
-			}
-
-			// good Id, good lenght, good type of message
-			break
-
-		} else {
-			fmt.Printf("sendHello: Id HELLO_REPLY != Id HELLO\n")
-			fmt.Println("---------------------\n")
-			messCounter++
-
+		case 2: // reject and try to pull out the next response until TIMEOUT
 			timeNow := time.Now()
 
 			// if TIMEOUT -> exit from function to re-send HELLO
 			if timeStart.Sub(timeNow) >= TIMEOUT {
-				PanicMessage("sendHello: Timeout reception of HelloReply\n")
-				return false
+				messCounter++
+				return false, errors.New("sendHello: Timeout reception of HELLO_REPLY")
+			} else {
+				continue
 			}
+		case 3: // exit from function to re-send HELLO
+			messCounter++
+			return false, errors.New("sendHello: Id HELLO_REPLY != Id HELLO")
+		}
+
+		if bExit {
+			break
 		}
 	}
 	messCounter++
-	return true
+	return true, nil
+}
+
+// Check incoming UDP datagramme by 3 parameters: length, type and id
+// Return:
+// 1 if length does not match expected length
+// 2 if type does not match expected type
+// 3 if id does not match expected id
+// 0 if all is ok
+func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strTypeExp string) int {
+
+	// check lenght  -> if error, exit from function to re-send request
+	hasToBe := binary.BigEndian.Uint16(bufRes[5:7]) + 4 + 1 + 2 + 64
+	fmt.Println("\n-------- check lenght -------------")
+	fmt.Printf("readed    : %d\n", lenRecieved)
+	fmt.Printf("has to be : %d\n", hasToBe)
+	fmt.Println("---------------------\n")
+
+	if hasToBe != uint16(lenRecieved) {
+		fmt.Printf("The lenght of %s recieved != expected one", strTypeExp)
+		return 1
+	}
+
+	// check type -> if error, reject and wait the next response
+	if CheckTypeEquality(byte(typeExp), bufRes) == -1 {
+		fmt.Printf("Not type %d was recieved, but %d\n", typeExp, bufRes[4:5][0])
+		return 2
+	}
+
+	// check id  -> if error, exit from function to re-send request
+	id := binary.BigEndian.Uint32(bufRes[:4])
+	fmt.Println("\n---------- check id -----------")
+	fmt.Printf("REQUEST  id : %v\n", messCounter)
+	fmt.Printf("RESPONSE id : %v\n", id)
+	fmt.Printf("typeMess  %v\n", bufRes[4:5])
+	fmt.Printf("lenMess   %v\n", bufRes[5:7])
+	fmt.Printf("response  %v\n\n", string(bufRes[7:7+binary.BigEndian.Uint16(bufRes[5:7])]))
+	fmt.Println("---------------------\n")
+
+	if id != messCounter {
+		fmt.Printf("Id of request %d != id of response %d\n", messCounter, id)
+		return 3
+	}
+	return 0
 }
 
 // Send "GetDatum" & Recieve "Datum"

@@ -23,13 +23,13 @@ func main() {
 	myPeer := os.Args[1]
 
 	// init params and create merkel tree
-	name, port, dirPath := readConfig("config")
-
-	var root moduls.Node
-
-	if len(dirPath) != 0 {
-		root = moduls.Merkelify(dirPath)
-	}
+	//	name, port, dirPath := readConfig("config")
+	//
+	//	var root moduls.Node
+	//
+	//	if len(dirPath) != 0 {
+	//		root = moduls.Merkelify(dirPath)
+	//	}
 
 	// addresses of server and peers
 	var servAdresses []string
