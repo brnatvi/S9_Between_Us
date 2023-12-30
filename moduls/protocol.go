@@ -567,6 +567,8 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 		return nil, err
 	}
 
+	conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
+
 	bufRes := make([]byte, DATAGRAM_SIZE)
 	timeStart := time.Now()
 
@@ -589,11 +591,11 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 			if CheckTypeEquality(byte(DATUM), bufRes) == -1 {
 				if CheckTypeEquality(byte(NO_DATUM), bufRes) == -1 {
 					messCounter++
-					//	fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
+					fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
 					return nil, nil
 				} else {
 					messCounter++
-					//	fmt.Printf("GetDataByHash: NO_DATUM was received\n")
+					fmt.Printf("GetDataByHash: NO_DATUM was received %d\n", messCounter)
 					return nil, NoDatumRecieved()
 				}
 			}
@@ -819,26 +821,4 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 		}
 	}
 	return RESULT_OK
-}
-
-// Create file by filePath & Write data to it
-func CreateFile(filePath string, data []byte) error {
-
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
-	if _, err = file.Write(data); err != nil {
-		file.Close()
-		log.Fatal(err)
-		return err
-	}
-
-	if err = file.Close(); err != nil {
-		log.Fatal(err)
-		return err
-	}
-	return nil
 }
