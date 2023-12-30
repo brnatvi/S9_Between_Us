@@ -2,6 +2,7 @@ package moduls
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 )
@@ -48,10 +49,34 @@ func DebugPrint(msg interface{}) {
 }
 
 func CheckTypeEquality(wantedType byte, recieved []byte) int {
-	if recieved[4:5][0] != wantedType {
-		len := binary.BigEndian.Uint16(recieved[5:7])
-		log.Printf("%s Not a %d was recieved, but %d. Message: %v %s\n\n", string(colorYellow), wantedType, recieved[4:5][0], string(recieved[7:(7+len)]), string(colorReset))
+	if recieved[POS_TYPE:POS_LENGTH][0] != wantedType {
+		len := binary.BigEndian.Uint16(recieved[POS_LENGTH:POS_HASH])
+		log.Printf("%s Not a %d was recieved, but %d. Message: %v %s\n\n",
+			string(colorYellow),
+			wantedType,
+			recieved[POS_TYPE:POS_LENGTH][0],
+			string(recieved[POS_HASH:(POS_HASH+len)]),
+			string(colorReset))
 		return -1
 	}
 	return 0
 }
+
+func NoDatumRecieved() error {
+	return errors.New("NO_DATUM was received")
+}
+
+/*
+type timeoutError struct{}
+
+func (e timeoutError) Error() string {
+	return "timeout"
+}
+
+func (e timeoutError) Timeout() bool {
+	return true
+}
+
+var errTimeout = timeoutError{}
+
+*/

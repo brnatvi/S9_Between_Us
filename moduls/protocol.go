@@ -18,11 +18,9 @@ import (
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
+const LOG_PRINT_DATA = false
 
 var messCounter uint32 = 1
-
-const CHUNK_SIZE = 1024    // (bytes)
-const DATAGRAM_SIZE = 2048 // (bytes) 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
 
 var isCanceled bool = true // if need to maintain connection with server
 var hasRoot bool = false   // if we have a tree
@@ -45,13 +43,36 @@ const (
 	NAT_TRAVERSAL         = 7
 )
 
+const (
+	RESULT_OK    = 0
+	RESULT_ERROR = 1
+)
+
 // NODE TYPES (first byte of body)
 const (
-	CHUNK     = 0 // 0
-	BIG_FILE  = 1 // 1
-	DIRECTORY = 2 // 2
-	// this one is just for the max children in the tree
-	MAX_CHILDREN = 32 // 32
+	CHUNK        = 0 //to rename to NODE_
+	BIG_FILE     = 1 //to rename to NODE_
+	DIRECTORY    = 2 //to rename to NODE_
+	NODE_UNKNOWN = 3 //
+)
+
+// SIZES (bytes, count)
+const (
+	CHUNK_SIZE    = 1024
+	DATAGRAM_SIZE = 2048 // 4 id + 1 type + 2 length + 1 node type + 1024 body + 64 singature
+	ID_SIZE       = 4
+	TYPE_SIZE     = 1
+	LENGTH_SIZE   = 2
+	HASH_SIZE     = 32
+	NAME_SIZE     = 32
+	VALUE_SIZE    = 32
+	SIGN_SIZE     = 64
+	POS_TYPE      = 4
+	POS_LENGTH    = 5
+	POS_HASH      = 7
+	POS_VALUE     = 39
+	POS_SIGN      = 71
+	MAX_CHILDREN  = 32 // max children in the tree
 )
 
 // Structure for temporary storage of data downloaded from hash (chunks, big_files or directories)
@@ -63,12 +84,25 @@ type StrObject struct {
 	Data   []byte // data, nil for BIG_FILE and content of DIRECTORY
 }
 
+type DataObject struct {
+	Type   int    // can be CHUNK, BIG_FILE or -1 for all content of DIRECTORY (because the type of data is unknown yet)
+	Name   string // "" for CHUNK and BIG_FILE
+	Path   string
+	Handle *os.File
+}
+
 // ==========================   Main functions ========================== //
 
 // getDatum req
-//func GetData(peer string) {
-//	// TODO write to local file
-//}
+func GetData(peer string) {
+	//rootPeerServ := moduls.PeerRoot(client, "jch.irif.fr")
+	////keyPeerServ := moduls.PeerKey(client, "jch.irif.fr")		// doesn't return a key
+	//
+	//fmt.Printf("peer root : %v \n", rootPeerServ)
+	//fmt.Printf("peer key : %v \n", servPublicKey)
+	//
+	//moduls.DownloadData(conn, rootPeerServ, myPeer, "", "")
+}
 
 func SendData() {
 	// TODO send requested data func
@@ -519,16 +553,18 @@ func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strType
 
 // Send "GetDatum" & Recieve "Datum"
 // Return: list of strObjects
-func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) []byte {
+func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error) {
+
+	fmt.Printf(">GetDataByHash(..., %v..., %s)\n", hash[0:32], myPeer)
 
 	isRecieved := false
 
 	// send GetDatum
-	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), myPeer, 32, hash, 0)
+	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), myPeer, HASH_SIZE, hash, 0)
 	_, err := conn.Write(buf)
 	if err != nil {
 		PanicMessage("GetDataByHash: Write to UDP failure\n")
-		return nil
+		return nil, err
 	}
 
 	bufRes := make([]byte, DATAGRAM_SIZE)
@@ -541,64 +577,78 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) []byte {
 		all, _, err := conn.ReadFromUDP(bufRes)
 		if err != nil {
 			if err != io.EOF {
+				messCounter++
 				fmt.Printf("GetDataByHash: ReadFromUDP error %v\n", err)
-				return nil
+				return nil, err
 			}
 		}
 
 		// check id
-		if binary.BigEndian.Uint32(bufRes[:4]) == messCounter {
+		if binary.BigEndian.Uint32(bufRes[:POS_TYPE]) == messCounter {
 			// check type
 			if CheckTypeEquality(byte(DATUM), bufRes) == -1 {
 				if CheckTypeEquality(byte(NO_DATUM), bufRes) == -1 {
-					fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
-					return nil
+					messCounter++
+					//	fmt.Printf("GetDataByHash: neither DATUM nor NO_DATUM was received\n")
+					return nil, nil
 				} else {
-					fmt.Printf("GetDataByHash: NO_DATUM was received\n")
-					return nil
+					messCounter++
+					//	fmt.Printf("GetDataByHash: NO_DATUM was received\n")
+					return nil, NoDatumRecieved()
 				}
 			}
 
 			fmt.Printf("Was recieved %d bytes at all\n", all)
+			fmt.Printf("Length     = %d bytes \n", binary.BigEndian.Uint16(bufRes[POS_LENGTH:POS_HASH]))
 
-			lenValue := binary.BigEndian.Uint16(bufRes[5:7]) - 32
+			// find lenght of value = Length - HASH_SIZE
+			lenValue := binary.BigEndian.Uint16(bufRes[POS_LENGTH:POS_HASH]) - HASH_SIZE
+
+			fmt.Printf("Was recieved %d bytes of value\n", lenValue)
 
 			// Check hash 1 : if hash in GetDatum == hash in DATUM
-			for i := 0; i < 32; i++ {
-				if bufRes[7+i] != hash[i] {
-					PanicMessage("GetDataByHash: Data substitution !!! The hash I received is not the one I asked for\n")
-					return nil
+			for i := 0; i < HASH_SIZE; i++ {
+				if hash[i] != bufRes[POS_HASH+i] {
+					messCounter++
+					PanicMessage("GetDataByHash: Data substitution !!! The hash I received is not the one I've asked for\n")
+					return nil, nil
 				}
 			}
 
-			value := bufRes[39:(39 + lenValue)]
+			value := bufRes[POS_VALUE:(POS_VALUE + lenValue)]
 
 			// Check hash 2 : if hash in DATUM is really hash of value (there was no value substitution)
 			hashedValue := sha256.Sum256(value)
 
-			for i := 0; i < 32; i++ {
+			for i := 0; i < HASH_SIZE; i++ {
 				if hashedValue[i] != hash[i] {
-					PanicMessage("GetDataByHash: Data substitution !!! The hash(value) does not match the one I asked for\n")
-					return nil
+					messCounter++
+					PanicMessage("GetDataByHash: Data substitution !!! The hash(value) does not match the one I've asked for\n")
+					return nil, nil
 				}
 			}
 
 			messCounter++
 			isRecieved = true
 
-			return value
+			if LOG_PRINT_DATA {
+				fmt.Printf("GetDataByHash Value: %v \n\n", value)
+			}
+
+			return value, nil
 
 		} else {
 			fmt.Printf("GetDataByHash: MessageId DATUM != MessageId GET_DATUM\n")
 			timeNow := time.Now()
 
 			if timeStart.Sub(timeNow) >= TIMEOUT {
+				messCounter++
 				PanicMessage("GetDataByHash: Timeout reception of DATUM\n")
-				return nil
+				return nil, nil
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // Parser for data obtained by hash.
@@ -606,6 +656,8 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) []byte {
 // Parameter: binary array to parce
 // Returns: a list of StrObjects whose length = 1 for CHUNK and BIG_FILE, >=1 for DIRECTORY
 func ParceValue(data []byte) []StrObject {
+
+	fmt.Printf(">ParceValue(...)\n")
 
 	var listContent []StrObject
 
@@ -631,39 +683,38 @@ func ParceValue(data []byte) []StrObject {
 		newObj.Type = BIG_FILE
 		newObj.Name = ""
 		newObj.Data = nil
+		newObj.NbHash = (l - 1) / HASH_SIZE
+		fmt.Printf("Hash count of BIG_FILE : %d\n", newObj.NbHash)
 
 		// Bring together all the hashes of a large file
-		c := 1
-		for c <= 32 {
-			newObj.Hash = append(newObj.Hash, data[point:(point+32)]...)
-			point = point + 32
-			c++
-		}
-		newObj.NbHash = c - 1
+		newObj.Hash = append(newObj.Hash, data[point:point+(newObj.NbHash*HASH_SIZE)]...)
 
 		listContent = append(listContent, newObj)
 		return listContent
 
 	case DIRECTORY:
 		// Directory contains a list of elements of the forme: name(32 bytes) + hash(32 bytes)
-		for point < l {
+		for point < (l - 1) {
 			var newObj StrObject
 			var binName []byte
 
-			binNameZero := data[point:(point + 32)]
+			binNameZeros := data[point:(point + NAME_SIZE)]
 
-			for _, b := range binNameZero {
+			for _, b := range binNameZeros {
 				if b != byte(0) {
 					binName = append(binName, b)
 				}
 			}
 			newObj.Name = string(binName)
-			point = point + 32
-			newObj.Hash = data[point:(point + 32)]
-			point = point + 32
+			point = point + NAME_SIZE
 
-			// their types are still unknown, so -1
-			newObj.Type = -1
+			newObj.Hash = data[point:(point + HASH_SIZE)]
+			point = point + HASH_SIZE
+
+			fmt.Printf("newObj.Name : %s, newObj.Hash : %v\n", newObj.Name, newObj.Hash)
+
+			// their types are still unknown, so NODE_UNKNOWN
+			newObj.Type = NODE_UNKNOWN
 			newObj.NbHash = 1
 			newObj.Data = nil
 			listContent = append(listContent, newObj)
@@ -683,27 +734,17 @@ func ParceValue(data []byte) []StrObject {
 // - conn - UDP Connection
 // - hashPeer - hash of peer
 // - myPeer - name of my peer
-// - nameData - name of the file or folder whose data will be downloaded by hash
-// - parentName - name of folder containing nameData
-func GetData(conn *net.UDPConn, hashPeer []byte, myPeer string, nameData string, parentName string) {
+// - DataObj - data object, holds information about current file and diectory
+func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *DataObject) int {
 
-	var path string
-	if nameData == "" {
-		p, _ := os.Getwd()
-		path = filepath.Join(p, "Recieved_Data")
+	fmt.Printf(">DownloadData(..., %v..., %s, %s, %s)\n", hashPeer[0:32], myPeer, DataObj.Name, DataObj.Path)
 
-		// create folder if it not exist
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.Mkdir(path, 0777)
-		}
-	} else {
-		path = filepath.Join(parentName, nameData)
-	}
-
-	value := GetDataByHash(conn, hashPeer, myPeer)
+	value, _ := GetDataByHash(conn, hashPeer, myPeer)
 
 	if len(value) != 0 {
-		fmt.Printf("\nvalue : %v \n", value)
+		if LOG_PRINT_DATA {
+			fmt.Printf("DownloadData: Value from GetDataByHash : %v \n", value)
+		}
 
 		// Parcing the value recieved
 		var listContent []StrObject
@@ -711,41 +752,73 @@ func GetData(conn *net.UDPConn, hashPeer []byte, myPeer string, nameData string,
 
 		// Create the files and directories
 		for _, el := range listContent {
-
 			if el.Type == CHUNK {
-				CreateFile(path, el.Data)
-				return
+				fmt.Printf("DownloadData: CHUNK for file %s\n", DataObj.Name)
+				if DataObj.Handle == nil {
+					FilePath := DataObj.Path
+					FilePath = filepath.Join(FilePath, DataObj.Name)
+					hndl, err := os.OpenFile(FilePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+					DataObj.Handle = hndl
+					if err != nil {
+						log.Fatal(err)
+						return RESULT_ERROR
+					}
+				}
 
+				if _, err := DataObj.Handle.Write(el.Data); err != nil {
+					DataObj.Handle.Close()
+					DataObj.Handle = nil
+					log.Fatal(err)
+					return RESULT_ERROR
+				}
 			} else if el.Type == BIG_FILE {
+				fmt.Printf("DownloadData: BIG_FILE for file %s\n", DataObj.Name)
+
 				point := 0
-				var bufer []byte
+				fmt.Printf("Len of BIG_FILE bufer\n")
 
 				// The ParceValue function brought together all the hashes of a large file
 				// So to receive data, we need to send requests for each 32 byte pieces:
 				for i := 0; i < el.NbHash; i++ {
-					val := GetDataByHash(conn, el.Hash[point:point+32], myPeer)
-					bufer = append(bufer, val...)
-					point = point + 32
+					res := DownloadData(conn, el.Hash[point:point+HASH_SIZE], myPeer, DataObj)
+					point = point + HASH_SIZE
+					if res != RESULT_OK {
+						return res
+					}
+				}
+			} else if el.Type == NODE_UNKNOWN {
+
+				Path := DataObj.Path
+				Path = filepath.Join(Path, DataObj.Name)
+
+				if _, err := os.Stat(Path); os.IsNotExist(err) {
+					os.Mkdir(Path, 0777)
 				}
 
-				CreateFile(path, bufer)
-				return
+				fmt.Println("=============================================================")
+				fmt.Printf("DownloadData: DIR for content %s of directory %s\n", el.Name, Path)
 
-			} else if el.Type == -1 {
-
-				if _, err := os.Stat(path); os.IsNotExist(err) {
-					os.Mkdir(path, 0777)
-				}
 				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
 
+				ChildObj := DataObject{NODE_UNKNOWN, el.Name, Path, nil}
 				// recursive call
-				GetData(conn, el.Hash, myPeer, el.Name, path)
+				res := DownloadData(conn, el.Hash, myPeer, &ChildObj)
+				if res != RESULT_OK {
+					return res
+				}
 
+				if ChildObj.Handle != nil {
+					err := ChildObj.Handle.Close()
+					if err != nil {
+						log.Fatal(err)
+					}
+				}
 			} else {
 				// do nothing
 			}
 		}
 	}
+	return RESULT_OK
 }
 
 // Create file by filePath & Write data to it

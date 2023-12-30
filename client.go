@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -57,14 +58,27 @@ func main() {
 	servPublicKey = moduls.RegistrationOnServer(conn, myPeer)
 
 	rootPeerServ := moduls.PeerRoot(client, "jch.irif.fr")
-	//keyPeerServ := moduls.PeerKey(client, "jch.irif.fr")		// doesn't return a key
 
 	fmt.Printf("peer root : %v \n", rootPeerServ)
 	fmt.Printf("peer key : %v \n", servPublicKey)
 
-	//	moduls.GetData(conn, rootPeerServ, myPeer, "", "")
+	DataObj := moduls.DataObject{moduls.NODE_UNKNOWN, "", "", nil}
+	Path, err := os.Getwd()
 
-	moduls.MaintainConnectionServer(conn, myPeer)
+	if err != nil {
+		fmt.Printf("Panic\n")
+		return
+	}
+
+	DataObj.Path = Path
+	DataObj.Path = filepath.Join(DataObj.Path, "Recieved_Data")
+	if _, err := os.Stat(DataObj.Path); os.IsNotExist(err) {
+		os.Mkdir(DataObj.Path, 0777)
+	}
+
+	moduls.DownloadData(conn, rootPeerServ, myPeer, &DataObj)
+
+	//moduls.MaintainConnectionServer(conn, myPeer)
 
 	//	reader := bufio.NewReader(os.Stdin)
 	//	menu(reader, client)
