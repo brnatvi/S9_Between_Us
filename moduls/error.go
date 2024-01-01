@@ -48,6 +48,10 @@ func DebugPrint(msg interface{}) {
 	}
 }
 
+func PrintError(msg string) {
+	fmt.Printf("%s%s%s\n", string(colorRed), msg, string(colorReset))
+}
+
 func CheckTypeEquality(wantedType byte, recieved []byte) int {
 	if recieved[POS_TYPE:POS_LENGTH][0] != wantedType {
 		len := binary.BigEndian.Uint16(recieved[POS_LENGTH:POS_HASH])
@@ -65,18 +69,3 @@ func CheckTypeEquality(wantedType byte, recieved []byte) int {
 func NoDatumRecieved() error {
 	return errors.New("NO_DATUM was received")
 }
-
-/*
-type timeoutError struct{}
-
-func (e timeoutError) Error() string {
-	return "timeout"
-}
-
-func (e timeoutError) Timeout() bool {
-	return true
-}
-
-var errTimeout = timeoutError{}
-
-*/
