@@ -15,8 +15,6 @@ import (
 	"client.go/moduls"
 )
 
-// var id = 0 // an incrementing counter for the id field
-
 const TIMEOUT = 5 * time.Second
 
 const (
@@ -140,7 +138,6 @@ func processClient(client *http.Client) {
 				DataObj := moduls.DataObject{moduls.OP_DOWNLOAD_HASH, moduls.NODE_UNKNOWN, "", "", "", outputDir, nil}
 				moduls.DownloadData(conn, hash, os.Args[PEER_NAME_IDX], &DataObj)
 			} else { //Download path
-				moduls.PrintError("Download path")
 				DataObj := moduls.DataObject{moduls.OP_DOWNLOAD_PATH, moduls.NODE_UNKNOWN, "", "/", os.Args[REMOTE_PATH_IDX], outputDir, nil}
 				moduls.DownloadData(conn, rootPeerServ, os.Args[PEER_NAME_IDX], &DataObj)
 			}

@@ -763,7 +763,9 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 		for _, el := range listContent {
 			if el.Type == CHUNK {
 				if DataObj.Op == OP_DOWNLOAD_HASH {
-					fmt.Printf("DownloadData: CHUNK for file %s\n", DataObj.Name)
+					if LOG_PRINT_DATA {
+						fmt.Printf("DownloadData: CHUNK for file %s\n", DataObj.Name)
+					}
 					if DataObj.Handle == nil {
 						FilePath := DataObj.HddPath
 						FilePath = filepath.Join(FilePath, DataObj.Name)
@@ -784,7 +786,9 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 				}
 			} else if el.Type == BIG_FILE {
 				if DataObj.Op == OP_DOWNLOAD_HASH {
-					fmt.Printf("DownloadData: BIG_FILE for file %s\n", DataObj.Name)
+					if LOG_PRINT_DATA {
+						fmt.Printf("DownloadData: BIG_FILE for file %s\n", DataObj.Name)
+					}
 
 					point := 0
 
@@ -800,15 +804,19 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 				}
 			} else if el.Type == NODE_UNKNOWN {
 
-				Path := DataObj.Path
-				Path = filepath.Join(Path, DataObj.Name)
+				PeerDirPath := DataObj.Path
+				PeerDirPath = filepath.Join(PeerDirPath, DataObj.Name)
 
 				HddPath := DataObj.HddPath
 				HddPath = filepath.Join(HddPath, DataObj.Name)
 
+				opPrev := DataObj.Op
+
 				//if path has been found - start downloading data
 				if DataObj.Op == OP_DOWNLOAD_PATH {
-					if DataObj.SearchPath == Path {
+					FilePath := filepath.Join(PeerDirPath, el.Name)
+
+					if DataObj.SearchPath == PeerDirPath || DataObj.SearchPath == FilePath {
 						DataObj.Op = OP_DOWNLOAD_HASH
 					}
 				}
@@ -819,12 +827,13 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 					}
 				}
 
-				fmt.Println("=============================================================")
-				fmt.Printf("DownloadData: DIR for content %s of directory %s\n", el.Name, Path)
+				if LOG_PRINT_DATA {
+					fmt.Println("=============================================================")
+					fmt.Printf("DownloadData: DIR for content %s of directory %s\n", el.Name, PeerDirPath)
+					fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
+				}
 
-				fmt.Printf("Name : %s, Hash : %v\n", el.Name, el.Hash)
-
-				ChildObj := DataObject{DataObj.Op, NODE_UNKNOWN, el.Name, Path, DataObj.SearchPath, HddPath, nil}
+				ChildObj := DataObject{DataObj.Op, NODE_UNKNOWN, el.Name, PeerDirPath, DataObj.SearchPath, HddPath, nil}
 				// recursive call
 				res := DownloadData(conn, el.Hash, myPeer, &ChildObj)
 				if res != RESULT_OK {
@@ -837,6 +846,8 @@ func DownloadData(conn *net.UDPConn, hashPeer []byte, myPeer string, DataObj *Da
 						HandleFatalError(err, "DownloadData, close")
 					}
 				}
+
+				DataObj.Op = opPrev
 			} else {
 				// do nothing
 			}
