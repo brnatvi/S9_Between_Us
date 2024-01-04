@@ -42,13 +42,7 @@ func main() {
 	}
 
 	// init params and create merkel tree
-	//	name, port, dirPath := readConfig("config")
-	//
-	//	var root moduls.Node
-	//
-	//	if len(dirPath) != 0 {
-	//		root = moduls.Merkelify(dirPath)
-	//	}
+	myPeer, port, dirPath := readConfig("config")
 
 	// Create TCP client
 	transport := &*http.DefaultTransport.(*http.Transport)
@@ -61,7 +55,34 @@ func main() {
 	if MODE_CLIENT == os.Args[MODE_IDX] {
 		processClient(client)
 	} else if MODE_SERVER == os.Args[MODE_IDX] {
-		//moduls.MaintainConnectionServer(conn, myPeer)
+
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%s", port))
+		moduls.HandlePanicError(err, "[ERROR]: err resolving address ")
+		conn, err := net.ListenUDP("udp", addr)
+		if moduls.LOG_PRINT_DATA {
+			fmt.Printf("Listening on port %s", port)
+		}
+
+		serverStringAddr := moduls.PeerAddr(client, "jch.irif.fr")
+		// Create UDP connection with server
+		serverAddr, err := net.ResolveUDPAddr("udp", serverStringAddr[0])
+		moduls.HandleFatalError(err, "ResolveUDPAddr failure")
+
+		serverConn, err := net.DialUDP("udp", nil, serverAddr)
+		moduls.HandleFatalError(err, "DialUDP failure")
+
+		go moduls.MaintainConnectionServer(serverConn, myPeer, dirPath)
+		var root moduls.Node
+		for {
+			root = moduls.Merkelify(dirPath)
+
+			buffer := make([]byte, moduls.DATAGRAM_SIZE)
+			_, remoteAddr, err := conn.ReadFromUDP(buffer)
+			moduls.HandlePanicError(err, fmt.Sprintf("[ERROR] reading message from %s: ", remoteAddr))
+			moduls.ReplyToIncoming(conn, remoteAddr, buffer, root, myPeer)
+
+		}
+
 	} else if MODE_MENU == os.Args[MODE_IDX] {
 		reader := bufio.NewReader(os.Stdin)
 		menu(reader, client)
@@ -109,7 +130,7 @@ func processClient(client *http.Client) {
 		moduls.HandleFatalError(err, "DialUDP failure")
 
 		// Register on Server
-		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX])
+		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX], "")
 
 		fmt.Printf("Connected to %s\n - Public key : %v\n", os.Args[SERVER_NAME_IDX], servPublicKey)
 
@@ -214,8 +235,6 @@ func readConfig(filename string) (name string, port string, dirPath string) {
 
 func menu(reader *bufio.Reader, client *http.Client) {
 
-	// TODO prompt for username
-	// TODO prompt for the user to enter a path for their data's root
 	// TODO p -d interactions(?) after first request
 	for {
 		fmt.Print(`
