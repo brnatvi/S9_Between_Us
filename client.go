@@ -119,24 +119,37 @@ func processClient(client *http.Client) {
 			return
 		}
 
-		rootPeerServ := moduls.PeerRoot(client, os.Args[PEER_IDX])
-		peerAdresses := moduls.PeerAddr(client, os.Args[PEER_IDX])
-
-		// Create UDP connection with server
-		addr, err := net.ResolveUDPAddr("udp", peerAdresses[0])
+		//========= Create UDP connection with server
+		addr, err := net.ResolveUDPAddr("udp", GetServerAdresses(client)[0])
 		moduls.HandleFatalError(err, "ResolveUDPAddr failure")
 
 		conn, err := net.DialUDP("udp", nil, addr)
-		moduls.HandleFatalError(err, "DialUDP failure")
+		moduls.HandleFatalError(err, "DialUDP server failure")
 
-		// Register on Server
-		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX], "")
+		//========= Register on Server
+		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX], "") // empty dirpath = sharing nothing
+		fmt.Printf("Connected to server { %s }\n - Public key : %v\n", os.Args[SERVER_NAME_IDX], servPublicKey)
 
-		fmt.Printf("Connected to %s\n - Public key : %v\n", os.Args[SERVER_NAME_IDX], servPublicKey)
+		//========= Create UDP connection with peer
+		peerAdresses := moduls.PeerAddr(client, os.Args[PEER_IDX])
+		rootPeer := moduls.PeerRoot(client, os.Args[PEER_IDX])
+
+		addrPeer, err := net.ResolveUDPAddr("udp", peerAdresses[0])
+		moduls.HandleFatalError(err, "ResolveUDPAddr failure")
+
+		connPeer, err := net.DialUDP("udp", nil, addrPeer)
+		moduls.HandleFatalError(err, "DialUDP peer failure")
+
+		if moduls.NatTraversal(client, conn, connPeer, os.Args[PEER_NAME_IDX], os.Args[PEER_IDX]) == moduls.RESULT_OK {
+			fmt.Printf("\nNatTraversal OK  --> Connected to peer { %s }\n", os.Args[PEER_IDX])
+		} else {
+			fmt.Printf("\nNatTraversal NotOK --> Not connected to peer { %s }\n", os.Args[PEER_IDX])
+		}
 
 		if "HashesInfo" == os.Args[CMD_IDX] {
 			DataObj := moduls.DataObject{moduls.OP_PRINT_HASH, moduls.NODE_UNKNOWN, "", "/", "", ".", nil}
-			moduls.DownloadData(conn, rootPeerServ, os.Args[PEER_NAME_IDX], &DataObj)
+			moduls.DownloadData(connPeer, rootPeer, os.Args[PEER_NAME_IDX], &DataObj)
+
 		} else {
 			if len(os.Args)-1 < 7 {
 				moduls.PrintError("Wrong console arguments")
@@ -157,10 +170,10 @@ func processClient(client *http.Client) {
 					return
 				}
 				DataObj := moduls.DataObject{moduls.OP_DOWNLOAD_HASH, moduls.NODE_UNKNOWN, "", "", "", outputDir, nil}
-				moduls.DownloadData(conn, hash, os.Args[PEER_NAME_IDX], &DataObj)
+				moduls.DownloadData(connPeer, hash, os.Args[PEER_NAME_IDX], &DataObj)
 			} else { //Download path
 				DataObj := moduls.DataObject{moduls.OP_DOWNLOAD_PATH, moduls.NODE_UNKNOWN, "", "/", os.Args[REMOTE_PATH_IDX], outputDir, nil}
-				moduls.DownloadData(conn, rootPeerServ, os.Args[PEER_NAME_IDX], &DataObj)
+				moduls.DownloadData(connPeer, rootPeer, os.Args[PEER_NAME_IDX], &DataObj)
 			}
 		}
 

@@ -103,7 +103,7 @@ type DataObject struct {
 // ==========================   Main functions ========================== //
 
 // Register on the server
-// Parameters:
+// Parameters:PublicKey
 // - conn - UDP Connection
 // - myPeer - name of my peer
 // Return: public key of Server
@@ -553,7 +553,7 @@ func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 	buf := composeHandChakeMessage(messCounter, byte(HELLO), myPeer, len(myPeer)+4, 0)
 	_, err := conn.Write(buf)
 	if err != nil {
-		HandleFatalError(err, "sendHello: Write to UDP failure")
+		PrintError("sendHello: Write to UDP failure\n")
 		return false, err
 	}
 
@@ -567,11 +567,10 @@ func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 		//recieve HELLO_REPLY
 		l, _, err := conn.ReadFromUDP(bufRes)
 		if err != nil {
-			if err != io.EOF {
-				HandleFatalError(err, "sendHello: ReadFromUDP error")
-				messCounter++
-				return false, err
-			}
+			HandleFatalError(err, "sendHello: ReadFromUDP failure")
+			messCounter++
+			return false, err
+
 		}
 
 		bExit := false
@@ -581,7 +580,7 @@ func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 			bExit = true
 		case 1: // exit from function to re-send HELLO
 			messCounter++
-			return false, errors.New("sendHello: The lenght of HELLO_REPLY recieved != expected one")
+			return false, errors.New("sendHello: The lenght of HELLO_REPLY recieved != expected one\n")
 
 		case 2: // reject and try to pull out the next response until TIMEOUT
 			timeNow := time.Now()
@@ -589,13 +588,13 @@ func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 			// if TIMEOUT -> exit from function to re-send HELLO
 			if timeStart.Sub(timeNow) >= TIMEOUT {
 				messCounter++
-				return false, errors.New("sendHello: Timeout reception of HELLO_REPLY")
+				return false, errors.New("sendHello: Timeout reception of HELLO_REPLY\n")
 			} else {
 				continue
 			}
 		case 3: // exit from function to re-send HELLO
 			messCounter++
-			return false, errors.New("sendHello: Id HELLO_REPLY != Id HELLO")
+			return false, errors.New("sendHello: Id HELLO_REPLY != Id HELLO\n")
 		}
 
 		if bExit {
@@ -623,13 +622,15 @@ func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strType
 		//fmt.Println("---------------------\n")
 	}
 	if hasToBe != uint16(lenRecieved) {
-		fmt.Printf("The lenght of %s recieved != expected one", strTypeExp)
+		st := fmt.Sprintf("The lenght of %s recieved != expected one", strTypeExp)
+		PrintError(st)
 		return 1
 	}
 
 	// check type -> if error, reject and wait the next response
 	if CheckTypeEquality(byte(typeExp), bufRes) == -1 {
-		fmt.Printf("Not type %d was recieved, but %d\n", typeExp, bufRes[4:5][0])
+		st := fmt.Sprintf("Not type %d was recieved, but %d\n", typeExp, bufRes[4:5][0])
+		PrintError(st)
 		return 2
 	}
 
@@ -646,7 +647,8 @@ func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strType
 		//fmt.Println("---------------------\n")
 	}
 	if id != messCounter {
-		fmt.Printf("Id of request %d != id of response %d\n", messCounter, id)
+		st := fmt.Sprintf("Id of request %d != id of response %d\n", messCounter, id)
+		PrintError(st)
 		return 3
 	}
 	return 0
@@ -664,7 +666,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), myPeer, HASH_SIZE, hash, 0)
 	_, err := conn.Write(buf)
 	if err != nil {
-		PanicMessage("GetDataByHash: Write to UDP failure\n")
+		PrintError("GetDataByHash: Write to UDP failure\n")
 		return nil, err
 	}
 
@@ -681,7 +683,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 		if err != nil {
 			if err != io.EOF {
 				messCounter++
-				HandlePanicError(err, "GetDataByHash, ReadFromUDP")
+				HandleFatalError(err, "GetDataByHash: ReadFromUDP")
 				return nil, err
 			}
 		}
@@ -722,7 +724,6 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 
 			// Check hash 2 : if hash in DATUM is really hash of value (there was no value substitution)
 			hashedValue := sha256.Sum256(value)
-
 			for i := 0; i < HASH_SIZE; i++ {
 				if hashedValue[i] != hash[i] {
 					messCounter++
@@ -740,7 +741,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 			return value, nil
 
 		} else {
-			fmt.Printf("GetDataByHash: MessageId DATUM != MessageId GET_DATUM\n")
+			PanicMessage("GetDataByHash: MessageId DATUM != MessageId GET_DATUM\n")
 			timeNow := time.Now()
 
 			if timeStart.Sub(timeNow) >= TIMEOUT {
