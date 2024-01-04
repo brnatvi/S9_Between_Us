@@ -24,32 +24,32 @@ const debug = true
 // misc funcs
 func HandlePanicError(err error, msg string) {
 	if err != nil {
-		log.Panic(msg, " : ", string(colorPurple), err, string(colorReset))
+		fmt.Printf("%s: %s%v%s\n", msg, string(colorPurple), err, string(colorReset))
 	}
-}
-
-func PanicMessage(msg string) {
-	log.Panic(string(colorPurple), msg, string(colorReset))
-}
-
-func UnexpectedMessage(msg string) {
-	log.Panic(string(colorYellow), msg, string(colorReset))
 }
 
 func HandleFatalError(err error, msg string) {
 	if err != nil {
-		log.Fatal(msg, " : ", string(colorRed), err, string(colorReset))
+		fmt.Printf("%s: %s%v%s\n", msg, string(colorRed), err, string(colorReset))
 	}
+}
+
+func PanicMessage(msg string) {
+	fmt.Printf("%s%s%s\n", string(colorPurple), msg, string(colorReset))
+}
+
+func UnexpectedMessage(msg string) {
+	fmt.Printf("%s%s%s\n", string(colorYellow), msg, string(colorReset))
+}
+
+func PrintError(msg string) {
+	fmt.Printf("%s%s%s\n", string(colorRed), msg, string(colorReset))
 }
 
 func DebugPrint(msg interface{}) {
 	if debug {
 		fmt.Printf("%s%q%s\n", string(colorGreen), msg, string(colorReset))
 	}
-}
-
-func PrintError(msg string) {
-	fmt.Printf("%s%s%s\n", string(colorRed), msg, string(colorReset))
 }
 
 func CheckTypeEquality(wantedType byte, recieved []byte) int {

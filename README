@@ -34,6 +34,5 @@ Examples:
  * go run client.go jch.irif.fr neon Client DownloadPath jch.irif.fr /images ./Download/
 
 
-
 ### The list of active peers can be seen here:
 https://jch.irif.fr:8443
