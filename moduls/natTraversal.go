@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+// NAT bypass function:
+// first makes a maximum of 3 attempts to contact the <otherPeer>,
+// if attempts are unsuccessful, sends a request to the server and waits for a "Hello" message from the <otherPeer>,
+// and then sends a response message to confirm the connection
+// Parameters:
+// - tcpClient - TCP client with server
+// - conn - UDP connection with server
+// - connPeer - UDP connection with other peer
+// - myPeer - name of my peer
+// - otherPeer - name of other peer
+// Return: RESULT_ERROR or RESULT_OK
+
 func NatTraversal(tcpClient *http.Client, conn *net.UDPConn, connPeer *net.UDPConn, myPeer string, otherPeer string) int {
 	// max 3 attempts to send Hello to otherPeer
 	maxNbAtts := 3
@@ -132,6 +144,7 @@ func NatTraversal(tcpClient *http.Client, conn *net.UDPConn, connPeer *net.UDPCo
 	}
 }
 
+// Composes UDP message to send NatTravessal request and converts it to binary
 func composeNatTravMessage(idMes uint32, typeMes uint8, addr []byte, lenMes int, extentMes int) []byte {
 
 	var buf bytes.Buffer
