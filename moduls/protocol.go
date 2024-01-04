@@ -18,7 +18,7 @@ import (
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
-const LOG_PRINT_DATA = false
+const LOG_PRINT_DATA = true
 
 var messCounter uint32 = 1
 
@@ -102,22 +102,17 @@ type DataObject struct {
 
 // ==========================   Main functions ========================== //
 
-// getDatum req
-func GetData(peer string) {
-	//TODO
-}
-
-func SendData() {
-	// TODO send requested data func
-}
-
 // Register on the server
 // Parameters:PublicKey
 // - conn - UDP Connection
 // - myPeer - name of my peer
 // Return: public key of Server
-func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
+func RegistrationOnServer(conn *net.UDPConn, myPeer string, dirPath string) []byte {
 
+	var root Node
+	if len(dirPath) > 0 {
+		root = Merkelify(dirPath)
+	}
 	// send Hello till reception of good HelloReply
 	for {
 		b, err := sendHello(conn, myPeer)
@@ -179,7 +174,19 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 	if !hasRoot {
 		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
 	} else {
-		// TODO
+		var bytesBuffer bytes.Buffer
+		i := make([]byte, 4)
+		binary.BigEndian.PutUint32(i, newMessId)
+		bytesBuffer.Write(i)
+
+		bytesBuffer.WriteByte(byte(ROOT_REPLY))
+
+		j := make([]byte, 2)
+		binary.BigEndian.PutUint16(j, uint16(HASH_SIZE))
+		bytesBuffer.Write(j)
+
+		bytesBuffer.Write(root.hash)
+		buf = bytesBuffer.Bytes()
 	}
 
 	_, err = conn.Write(buf)
@@ -193,7 +200,7 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string) []byte {
 }
 
 // Maintain connection with server - sends messages every 30 seconds
-func MaintainConnectionServer(conn *net.UDPConn, myPeer string) {
+func MaintainConnectionServer(conn *net.UDPConn, myPeer string, dirPath string) {
 	for {
 		timeStart := time.Now()
 
@@ -209,15 +216,104 @@ func MaintainConnectionServer(conn *net.UDPConn, myPeer string) {
 				isCanceled = true
 				continue
 			} else {
+				if LOG_PRINT_DATA {
+					fmt.Printf("[INFO] : succesful handshake with server @ %s", time.Now())
+				}
 				time.Sleep(30 * time.Second)
 			}
 
 		} else {
 			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
-			RegistrationOnServer(conn, myPeer)
+			RegistrationOnServer(conn, myPeer, dirPath)
 			time.Sleep(30 * time.Second)
 		}
 	}
+}
+
+// Replies to getDatum requests
+// params:
+// - conn : udp connection
+// - peer : address of remote peer asking for data (unsure if this will be needed or not)
+// - root : root node of our merkel tree
+// peer would be of format "ip:port"
+func SendData(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root Node) (status int) {
+
+	hash := buffer[7:]
+	msgID := buffer[0:4]
+	node, value := getHash(root, hash)
+	length := 32
+	if value != nil {
+		length = len(value) + 1
+	}
+
+	message := make([]byte, 4+1+2+length)
+	if node == nil {
+		copy(message[0:4], msgID)
+		message[4] = byte(NO_DATUM)
+		binary.BigEndian.PutUint16(message[5:7], uint16(length))
+		copy(message[7:], hash)
+	} else {
+		binary.BigEndian.PutUint32(message[0:4], messCounter)
+		message[4] = byte(NO_DATUM)
+		binary.BigEndian.PutUint16(message[5:7], uint16(length))
+		message[5] = byte(root.nodeType)
+		copy(message[8:], hash)
+	}
+
+	// pick the right write method depending on how the client listening and handling of incoming message is done (clarified during call )
+	n, err := conn.WriteToUDP(message, remoteAddr)
+
+	if err != nil {
+		HandlePanicError(err, fmt.Sprintf("[ERROR] sending message to %s: ", remoteAddr))
+		return 404
+	}
+	if LOG_PRINT_DATA {
+		fmt.Printf("[INFO] wrote %d bytes to %s ", n, remoteAddr)
+	}
+	// success
+	return 200
+}
+
+func sendHelloReply(conn *net.UDPConn, remoteAddr *net.UDPAddr, myPeer string, msgID []byte) (status int) {
+
+	helloReply := composeDataSendMessage(binary.BigEndian.Uint32(msgID), HELLO_REPLY, len(myPeer)+4, myPeer)
+
+	n, err := conn.WriteToUDP(helloReply, remoteAddr)
+	if err != nil {
+		HandlePanicError(err, fmt.Sprintf("[ERROR]: failed to greet %s: ", remoteAddr))
+		return 404
+	}
+
+	if LOG_PRINT_DATA {
+		fmt.Printf("[INFO]: Greetings to %s with %d bytes", remoteAddr, n)
+	}
+
+	return 200
+
+}
+
+// replies to incoming udp messages depending on their type
+func ReplyToIncoming(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root Node, myPeer string) (status int) {
+
+	var msgType uint8
+	msgType = uint8(buffer[5])
+	length := binary.BigEndian.Uint16(buffer[5:7])
+	if int(length) != len(buffer[7:]) {
+		// length mismatch
+		return 400
+	}
+
+	switch msgType {
+	case DATUM:
+		return SendData(conn, remoteAddr, buffer[7:], root)
+	case HELLO:
+		return sendHelloReply(conn, remoteAddr, myPeer, buffer[0:4])
+	case NAT_TRAVERSAL:
+		// do nothing
+		break
+	}
+	// unknown request
+	return 404
 }
 
 // ==========================   Auxiliary TCP functions ========================== //

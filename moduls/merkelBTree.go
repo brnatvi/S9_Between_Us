@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	gopath "path"
+	"strings"
 )
 
 type Node struct {
 	name     string
+	nodeType int64
 	offset   int64
 	hash     []byte
 	children []Node
@@ -20,16 +22,25 @@ func Merkelify(path string) (root Node) {
 	info, err := os.Stat(path)
 	HandlePanicError(err, "os.stat error, merkelify")
 
+	var r Node
+
 	if info.IsDir() {
-		return hashDir(path)
+		r = hashDir(path)
 	} else {
-		return hashFile(path)
+		r = hashFile(path)
 	}
+
+	if LOG_PRINT_DATA {
+		PrintMerkelTree(r, " ")
+	}
+
+	return r
 }
 
 // PS: this only includes the first 16 items in the directory
 func hashDir(path string) Node {
 	var child Node
+	child.nodeType = DIRECTORY
 	dir, err := os.ReadDir(path)
 	HandlePanicError(err, "os.readdir err, hashDir")
 
@@ -38,8 +49,9 @@ func hashDir(path string) Node {
 		cHash := sha256.New()
 		cHash.Write([]byte(path))
 		child = Node{
-			name: gopath.Base(path),
-			hash: cHash.Sum(nil),
+			name:     gopath.Base(path),
+			hash:     cHash.Sum(nil),
+			nodeType: DIRECTORY,
 		}
 	}
 
@@ -76,10 +88,11 @@ func hashFile(path string) Node {
 	// hash entire file and create nodes
 	var i int64
 	for {
-		Node := Node{
-			name:     fmt.Sprintf("/leaf%d", i),
+		node := Node{
+			name:     fmt.Sprintf("%s/%d", path, i),
 			children: nil,
 			offset:   i * CHUNK_SIZE,
+			nodeType: CHUNK,
 		}
 
 		n, err := file.Read(chunk)
@@ -90,8 +103,15 @@ func hashFile(path string) Node {
 
 		tempHash := sha256.New()
 		tempHash.Write(chunk[:n])
-		Node.hash = tempHash.Sum(nil)
-		nodes = append(nodes, Node)
+		node.hash = tempHash.Sum(nil)
+		nodes = append(nodes, node)
+		i++
+	}
+
+	if len(nodes) < 2 {
+		child.nodeType = CHUNK
+	} else {
+		child.nodeType = BIG_FILE
 	}
 
 	child = makeBTree(nodes)
@@ -114,6 +134,7 @@ func makeBTree(sortedNodes []Node) Node {
 	var internalNode Node
 	internalNode.name = "/InternalNode"
 	internalNode.hash = calculateNodeHash(sortedNodes)
+	internalNode.nodeType = BIG_FILE
 
 	// the max children - 1 can just be done with a +1 outside but complicating things is fun
 	perNode := (len(sortedNodes) + MAX_CHILDREN - 1) / MAX_CHILDREN
@@ -138,4 +159,52 @@ func calculateNodeHash(nodes []Node) []byte {
 		hash.Write(n.hash)
 	}
 	return hash.Sum(nil)
+}
+
+// search for specific hash in the tree
+func getHash(root Node, targetHash []byte) (node *Node, value []byte) {
+
+	if compareHash(root.hash, targetHash) {
+		path := strings.TrimSuffix(root.name, "/")
+		data := getDataWithOffset(path, root.offset)
+		return &root, data
+	}
+
+	for _, child := range root.children {
+		result, data := getHash(child, targetHash)
+		if result != nil {
+			return result, data
+		}
+	}
+
+	return nil, nil
+}
+
+func compareHash(hash1, hash2 []byte) bool {
+	return fmt.Sprintf("%x", hash1) == fmt.Sprintf("%x", hash2)
+}
+
+// opens file at `path“ and returns the first 1024 bytes found at `offset`
+func getDataWithOffset(path string, offset int64) []byte {
+	file, err := os.Open(path)
+	HandlePanicError(err, fmt.Sprintf("error opening file %s", path))
+
+	defer file.Close()
+	_, err = file.Seek(offset, 0)
+	HandlePanicError(err, fmt.Sprintf("error seeking to offset %d in file %s", offset, path))
+
+	buffer := make([]byte, 1024)
+	n, err := file.Read(buffer)
+	HandlePanicError(err, fmt.Sprintf("error reading from file %s @ offset %d", path, offset))
+
+	return buffer[:n]
+}
+
+// print merkel
+func PrintMerkelTree(root Node, indent string) {
+	fmt.Printf("%s- %s (Type: %d)\n", indent, root.name, root.nodeType)
+
+	for _, child := range root.children {
+		PrintMerkelTree(child, indent+"  ")
+	}
 }
