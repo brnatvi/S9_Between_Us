@@ -5,17 +5,20 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"math/big"
 )
 
-var keyServer ecdsa.PublicKey
-var keyPeer ecdsa.PublicKey
+var KeyServer ecdsa.PublicKey
+var KeyPeer ecdsa.PublicKey
+var MyPrivateKey ecdsa.PrivateKey
+var MyPublicKey ecdsa.PublicKey
 
 // Generate keys
-func GenerateKeys() (ecdsa.PrivateKey, ecdsa.PublicKey) {
-	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	publicKey, _ := privateKey.Public().(*ecdsa.PublicKey)
-	return *privateKey, *publicKey
+func GenerateKeys() {
+	MyPrivateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	MyPublicKey, _ := MyPrivateKey.Public().(*ecdsa.PublicKey)
+	fmt.Println(MyPublicKey)
 }
 
 // public key to 64 bytes array
@@ -29,10 +32,14 @@ func FormatPublicKey(publicKey *ecdsa.PublicKey) []byte {
 // Parse public key (in form of 64 bytes array)
 func ParcePublicKay(data []byte) ecdsa.PublicKey {
 	var x, y big.Int
-
-	x.SetBytes(data[:32])
-	y.SetBytes(data[32:])
-
+	if len(data) != 0 {
+		x.SetBytes(data[:32])
+		y.SetBytes(data[32:])
+	} else {
+		zeroArr := make([]byte, 64)
+		x.SetBytes(zeroArr[:32])
+		y.SetBytes(zeroArr[32:])
+	}
 	publicKey := ecdsa.PublicKey{
 		Curve: elliptic.P256(),
 		X:     &x,

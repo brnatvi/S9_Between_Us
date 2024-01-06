@@ -11,6 +11,24 @@ import (
 	"time"
 )
 
+func NatTraversalServer(message []byte, i int) *net.UDPConn {
+	len := binary.BigEndian.Uint16(message[POS_LENGTH:(POS_LENGTH + LENGTH_SIZE)])
+	stAddrPeer := string(message[POS_VALUE:(POS_VALUE + len)])
+	fmt.Printf("Address of peer : %s\n", stAddrPeer)
+
+	//Natalia: why port is hardcoded???
+	myAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", (8443+i)))
+	HandleFatalError(err, "ResolveUDPAddr failure")
+
+	peerAddr, err := net.ResolveUDPAddr("udp", stAddrPeer)
+	HandleFatalError(err, "ResolveUDPAddr failure")
+
+	conn, err := net.DialUDP("udp", myAddr, peerAddr)
+	HandleFatalError(err, "DialUDP failure")
+
+	return conn
+}
+
 // NAT bypass function:
 // first makes a maximum of 3 attempts to contact the <otherPeer>,
 // if attempts are unsuccessful, sends a request to the server and waits for a "Hello" message from the <otherPeer>,
@@ -20,12 +38,12 @@ import (
 // - conn - UDP connection with server
 // - connPeer - UDP connection with other peer
 // - myPeer - name of my peer
-// - otherPeer - name of other peer
+// - otherPeer - name of other peerNatTraversalNatTraversal
 // Return: RESULT_ERROR or RESULT_OK
 
 func NatTraversal(tcpClient *http.Client, conn *net.UDPConn, connPeer *net.UDPConn, myPeer string, otherPeer string) int {
 	// max 3 attempts to send Hello to otherPeer
-	maxNbAtts := 3
+	maxNbAtts := 1
 	count := 1
 	bufRes := make([]byte, DATAGRAM_SIZE)
 

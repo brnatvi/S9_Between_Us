@@ -15,7 +15,7 @@ import (
 	"client.go/moduls"
 )
 
-const TIMEOUT = 5 * time.Second
+const TIMEOUT = 1 * time.Second
 
 const (
 	SERVER_NAME_IDX  = 1
@@ -52,37 +52,73 @@ func main() {
 		Timeout:   TIMEOUT,
 	}
 
+	moduls.GenerateKeys()
+
 	if MODE_CLIENT == os.Args[MODE_IDX] {
 		processClient(client)
+
 	} else if MODE_SERVER == os.Args[MODE_IDX] {
 
 		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%s", port))
-		moduls.HandlePanicError(err, "[ERROR]: err resolving address ")
-		conn, err := net.ListenUDP("udp", addr)
-		if moduls.LOG_PRINT_DATA {
-			fmt.Printf("Listening on port %s", port)
-		}
 
-		serverStringAddr := moduls.PeerAddr(client, "jch.irif.fr")
+		fmt.Printf("Address %v\n", addr)
+
+		moduls.HandlePanicError(err, "[ERROR]: err resolving address ")
+
+		//	conn, err := net.ListenUDP("udp", addr)
+		//	if moduls.LOG_PRINT_DATA {
+		//		fmt.Printf("Listening on port %s", port)
+		//	}
+		//
+		serverStringAddr := GetServerAdresses(client)[0]
+
+		fmt.Println(serverStringAddr)
+
 		// Create UDP connection with server
-		serverAddr, err := net.ResolveUDPAddr("udp", serverStringAddr[0])
+		serverAddr, err := net.ResolveUDPAddr("udp", serverStringAddr)
 		moduls.HandleFatalError(err, "ResolveUDPAddr failure")
 
-		serverConn, err := net.DialUDP("udp", nil, serverAddr)
+		serverConn, err := net.DialUDP("udp", addr, serverAddr)
 		moduls.HandleFatalError(err, "DialUDP failure")
 
-		go moduls.MaintainConnectionServer(serverConn, myPeer, dirPath)
-		var root moduls.Node
+		root := moduls.Merkelify(dirPath)
+		fmt.Printf("my root: name %s, type %d, offset %d, hash %v, children %v\n",
+			root.Name,
+			root.NodeType,
+			root.Offset,
+			root.Hash,
+			root.Children)
+
+		moduls.RegistrationOnServer(serverConn, myPeer, &root)
+
+		timePing := time.Now()
+
+		buffer := make([]byte, moduls.DATAGRAM_SIZE)
+
 		for {
-			root = moduls.Merkelify(dirPath)
+			if time.Now().Sub(timePing) >= 10*time.Second {
+				moduls.MaintainConnectionServer(serverConn, &root)
+				timePing = time.Now()
+			}
 
-			buffer := make([]byte, moduls.DATAGRAM_SIZE)
-			_, remoteAddr, err := conn.ReadFromUDP(buffer)
-			moduls.HandlePanicError(err, fmt.Sprintf("[ERROR] reading message from %s: ", remoteAddr))
-			moduls.ReplyToIncoming(conn, remoteAddr, buffer, root, myPeer)
+			serverConn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
 
+			l, remoteAddr, err := serverConn.ReadFromUDP(buffer)
+
+			if err != nil {
+				if e, ok := err.(net.Error); !ok || !e.Timeout() {
+					moduls.HandlePanicError(err, fmt.Sprintf("[ERROR] reading message from %s: ", remoteAddr))
+				} else if e.Timeout() {
+					//fmt.Printf("Timeout ...\n")
+				}
+			}
+			if l > 0 {
+				fmt.Printf("Receive request %d from %v\n",
+					l,
+					remoteAddr)
+				moduls.ReplyToIncoming(serverConn, remoteAddr, buffer, moduls.Root, myPeer)
+			}
 		}
-
 	} else if MODE_MENU == os.Args[MODE_IDX] {
 		reader := bufio.NewReader(os.Stdin)
 		menu(reader, client)
@@ -127,12 +163,17 @@ func processClient(client *http.Client) {
 		moduls.HandleFatalError(err, "DialUDP server failure")
 
 		//========= Register on Server
-		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX], "") // empty dirpath = sharing nothing
+		servPublicKey := moduls.RegistrationOnServer(conn, os.Args[PEER_NAME_IDX], nil) // empty dirpath = sharing nothing
 		fmt.Printf("Connected to server { %s }\n - Public key : %v\n", os.Args[SERVER_NAME_IDX], servPublicKey)
+		moduls.KeyServer = moduls.ParcePublicKay(servPublicKey)
 
 		//========= Create UDP connection with peer
 		peerAdresses := moduls.PeerAddr(client, os.Args[PEER_IDX])
+		fmt.Printf("Peer's adresses %v\n", peerAdresses)
+
 		rootPeer := moduls.PeerRoot(client, os.Args[PEER_IDX])
+
+		moduls.KeyPeer = moduls.ParcePublicKay(moduls.PeerKey(client, os.Args[PEER_IDX]))
 
 		addrPeer, err := net.ResolveUDPAddr("udp", peerAdresses[0])
 		moduls.HandleFatalError(err, "ResolveUDPAddr failure")

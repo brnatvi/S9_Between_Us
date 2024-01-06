@@ -10,11 +10,11 @@ import (
 )
 
 type Node struct {
-	name     string
-	nodeType int64
-	offset   int64
-	hash     []byte
-	children []Node
+	Name     string
+	NodeType int64
+	Offset   int64
+	Hash     []byte
+	Children []Node
 }
 
 // TODO directory/file ==> merkel tree
@@ -40,27 +40,27 @@ func Merkelify(path string) (root Node) {
 // PS: this only includes the first 16 items in the directory
 func hashDir(path string) Node {
 	var child Node
-	child.nodeType = DIRECTORY
+	child.NodeType = DIRECTORY
 	dir, err := os.ReadDir(path)
 	HandlePanicError(err, "os.readdir err, hashDir")
 
-	// if empty directory just hash the path and return
+	// if empty directory just Hash the path and return
 	if len(dir) == 0 {
 		cHash := sha256.New()
 		cHash.Write([]byte(path))
 		child = Node{
-			name:     gopath.Base(path),
-			hash:     cHash.Sum(nil),
-			nodeType: DIRECTORY,
+			Name:     gopath.Base(path),
+			Hash:     cHash.Sum(nil),
+			NodeType: DIRECTORY,
 		}
 	}
 
 	for i, de := range dir {
 		filePath := path + "/" + de.Name()
 		if de.IsDir() {
-			child.children = append(child.children, hashDir(filePath))
+			child.Children = append(child.Children, hashDir(filePath))
 		} else {
-			child.children = append(child.children, hashFile(filePath))
+			child.Children = append(child.Children, hashFile(filePath))
 		}
 
 		// break after 16 items
@@ -68,7 +68,7 @@ func hashDir(path string) Node {
 			break
 		}
 	}
-	child.hash = calculateNodeHash(child.children)
+	child.Hash = calculateNodeHash(child.Children)
 	return child
 }
 
@@ -85,14 +85,14 @@ func hashFile(path string) Node {
 	chunk := make([]byte, CHUNK_SIZE)
 	var nodes []Node
 
-	// hash entire file and create nodes
+	// Hash entire file and create nodes
 	var i int64
 	for {
 		node := Node{
-			name:     fmt.Sprintf("%s/%d", path, i),
-			children: nil,
-			offset:   i * CHUNK_SIZE,
-			nodeType: CHUNK,
+			Name:     fmt.Sprintf("%s/%d", path, i),
+			Children: nil,
+			Offset:   i * CHUNK_SIZE,
+			NodeType: CHUNK,
 		}
 
 		n, err := file.Read(chunk)
@@ -103,23 +103,27 @@ func hashFile(path string) Node {
 
 		tempHash := sha256.New()
 		tempHash.Write(chunk[:n])
-		node.hash = tempHash.Sum(nil)
+		node.Hash = tempHash.Sum(nil)
 		nodes = append(nodes, node)
 		i++
 	}
 
 	if len(nodes) < 2 {
-		child.nodeType = CHUNK
+		child.NodeType = CHUNK
 	} else {
-		child.nodeType = BIG_FILE
+		child.NodeType = BIG_FILE
 	}
 
 	child = makeBTree(nodes)
-	child.name = gopath.Base(path)
+	child.Name = gopath.Base(path)
 	return child
 }
 
 // we are required to provide sources on code so for this one i did ask a friend for some help here (Mr. Scruff), just hints, not actual code
+
+//Natalia: If file is bigger than 32KB this code fails!
+//probably problem is in
+// > for start := 0; start < len(sortedNodes); start += perNode {
 func makeBTree(sortedNodes []Node) Node {
 	if len(sortedNodes) == 0 {
 		return Node{}
@@ -127,16 +131,16 @@ func makeBTree(sortedNodes []Node) Node {
 
 	// leaf Node
 	if len(sortedNodes) <= MAX_CHILDREN {
-		return Node{children: sortedNodes}
+		return Node{Children: sortedNodes}
 	}
 
 	// internal Node
 	var internalNode Node
-	internalNode.name = "/InternalNode"
-	internalNode.hash = calculateNodeHash(sortedNodes)
-	internalNode.nodeType = BIG_FILE
+	internalNode.Name = "/InternalNode"
+	internalNode.Hash = calculateNodeHash(sortedNodes)
+	internalNode.NodeType = BIG_FILE
 
-	// the max children - 1 can just be done with a +1 outside but complicating things is fun
+	// the max Children - 1 can just be done with a +1 outside but complicating things is fun
 	perNode := (len(sortedNodes) + MAX_CHILDREN - 1) / MAX_CHILDREN
 
 	for start := 0; start < len(sortedNodes); start += perNode {
@@ -145,32 +149,32 @@ func makeBTree(sortedNodes []Node) Node {
 			end = len(sortedNodes)
 		}
 		child := makeBTree(sortedNodes[start:end])
-		internalNode.children = append(internalNode.children, child)
+		internalNode.Children = append(internalNode.Children, child)
 	}
-	internalNode.offset = internalNode.children[0].offset
+	internalNode.Offset = internalNode.Children[0].Offset
 
 	return internalNode
 }
 
-// to get the children's hash
+// to get the Children's Hash
 func calculateNodeHash(nodes []Node) []byte {
-	hash := sha256.New()
+	Hash := sha256.New()
 	for _, n := range nodes {
-		hash.Write(n.hash)
+		Hash.Write(n.Hash)
 	}
-	return hash.Sum(nil)
+	return Hash.Sum(nil)
 }
 
-// search for specific hash in the tree
+// search for specific Hash in the tree
 func getHash(root Node, targetHash []byte) (node *Node, value []byte) {
 
-	if compareHash(root.hash, targetHash) {
-		path := strings.TrimSuffix(root.name, "/")
-		data := getDataWithOffset(path, root.offset)
+	if compareHash(root.Hash, targetHash) {
+		path := strings.TrimSuffix(root.Name, "/")
+		data := getDataWithOffset(path, root.Offset)
 		return &root, data
 	}
 
-	for _, child := range root.children {
+	for _, child := range root.Children {
 		result, data := getHash(child, targetHash)
 		if result != nil {
 			return result, data
@@ -184,27 +188,27 @@ func compareHash(hash1, hash2 []byte) bool {
 	return fmt.Sprintf("%x", hash1) == fmt.Sprintf("%x", hash2)
 }
 
-// opens file at `path“ and returns the first 1024 bytes found at `offset`
-func getDataWithOffset(path string, offset int64) []byte {
+// opens file at `path“ and returns the first 1024 bytes found at `Offset`
+func getDataWithOffset(path string, Offset int64) []byte {
 	file, err := os.Open(path)
 	HandlePanicError(err, fmt.Sprintf("error opening file %s", path))
 
 	defer file.Close()
-	_, err = file.Seek(offset, 0)
-	HandlePanicError(err, fmt.Sprintf("error seeking to offset %d in file %s", offset, path))
+	_, err = file.Seek(Offset, 0)
+	HandlePanicError(err, fmt.Sprintf("error seeking to Offset %d in file %s", Offset, path))
 
 	buffer := make([]byte, 1024)
 	n, err := file.Read(buffer)
-	HandlePanicError(err, fmt.Sprintf("error reading from file %s @ offset %d", path, offset))
+	HandlePanicError(err, fmt.Sprintf("error reading from file %s @ Offset %d", path, Offset))
 
 	return buffer[:n]
 }
 
 // print merkel
 func PrintMerkelTree(root Node, indent string) {
-	fmt.Printf("%s- %s (Type: %d)\n", indent, root.name, root.nodeType)
+	fmt.Printf("%s- %s (Type: %d)\n", indent, root.Name, root.NodeType)
 
-	for _, child := range root.children {
+	for _, child := range root.Children {
 		PrintMerkelTree(child, indent+"  ")
 	}
 }

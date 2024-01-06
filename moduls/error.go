@@ -2,6 +2,7 @@ package moduls
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -55,11 +56,11 @@ func DebugPrint(msg interface{}) {
 func CheckTypeEquality(wantedType byte, recieved []byte) int {
 	if recieved[POS_TYPE:POS_LENGTH][0] != wantedType {
 		len := binary.BigEndian.Uint16(recieved[POS_LENGTH:POS_HASH])
-		log.Printf("%s Not a %d was recieved, but %d. Message: %v %s\n\n",
+		log.Printf("%s Not a %d was recieved, but %d. Message: %s %s\n\n",
 			string(colorYellow),
 			wantedType,
 			recieved[POS_TYPE:POS_LENGTH][0],
-			string(recieved[POS_HASH:(POS_HASH+len)]),
+			hex.EncodeToString(recieved[POS_HASH:(POS_HASH+len)]),
 			string(colorReset))
 		return -1
 	}

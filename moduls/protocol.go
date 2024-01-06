@@ -18,12 +18,13 @@ import (
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
-const LOG_PRINT_DATA = true
+const LOG_PRINT_DATA = false
 
 var messCounter uint32 = 1
 
 var isCanceled bool = true // if need to maintain connection with server
-var hasRoot bool = false   // if we have a tree
+
+var Root Node
 
 // MESSAGE TYPES
 const (
@@ -75,6 +76,7 @@ const (
 	SIGN_SIZE     = 64
 	POS_TYPE      = 4
 	POS_LENGTH    = 5
+	POS_BODY      = 7
 	POS_HASH      = 7
 	POS_VALUE     = 39
 	POS_SIGN      = 71
@@ -101,18 +103,12 @@ type DataObject struct {
 }
 
 // ==========================   Main functions ========================== //
-
 // Register on the server
 // Parameters:PublicKey
 // - conn - UDP Connection
 // - myPeer - name of my peer
 // Return: public key of Server
-func RegistrationOnServer(conn *net.UDPConn, myPeer string, dirPath string) []byte {
-
-	var root Node
-	if len(dirPath) > 0 {
-		root = Merkelify(dirPath)
-	}
+func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 	// send Hello till reception of good HelloReply
 	for {
 		b, err := sendHello(conn, myPeer)
@@ -171,8 +167,9 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, dirPath string) []by
 	newMessId = binary.BigEndian.Uint32(buf[:4])
 
 	// send Hash("")
-	if !hasRoot {
-		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), 32, "")
+	if root == nil {
+		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), HASH_SIZE, "")
+
 	} else {
 		var bytesBuffer bytes.Buffer
 		i := make([]byte, 4)
@@ -185,8 +182,13 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, dirPath string) []by
 		binary.BigEndian.PutUint16(j, uint16(HASH_SIZE))
 		bytesBuffer.Write(j)
 
-		bytesBuffer.Write(root.hash)
+		bytesBuffer.Write(root.Hash)
+
+		// TODO where value!!
+
 		buf = bytesBuffer.Bytes()
+
+		//Natalia: receive root reply
 	}
 
 	_, err = conn.Write(buf)
@@ -200,34 +202,49 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, dirPath string) []by
 }
 
 // Maintain connection with server - sends messages every 30 seconds
-func MaintainConnectionServer(conn *net.UDPConn, myPeer string, dirPath string) {
-	for {
-		timeStart := time.Now()
+func MaintainConnectionServer(conn *net.UDPConn, root *Node) {
+	fmt.Printf("---- MaintainConnectionServer ---- \n")
 
-		if !isCanceled {
-			_, err := sendHello(conn, myPeer)
+	buf := make([]byte, DATAGRAM_SIZE)
 
-			if err != nil {
-				HandlePanicError(err, "MaintainConnectionServer")
-			}
-			timeNow := time.Now()
+	var bytesBuffer bytes.Buffer
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, messCounter)
+	bytesBuffer.Write(i)
 
-			if timeStart.Sub(timeNow) >= 180*time.Second {
-				isCanceled = true
-				continue
-			} else {
-				if LOG_PRINT_DATA {
-					fmt.Printf("[INFO] : succesful handshake with server @ %s", time.Now())
-				}
-				time.Sleep(30 * time.Second)
-			}
+	bytesBuffer.WriteByte(byte(ROOT))
 
-		} else {
-			fmt.Printf("Connection was lost, will try to reconnect ...\n\n")
-			RegistrationOnServer(conn, myPeer, dirPath)
-			time.Sleep(30 * time.Second)
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(HASH_SIZE))
+	bytesBuffer.Write(j)
+
+	bytesBuffer.Write(root.Hash)
+	buf = bytesBuffer.Bytes()
+
+	_, err := conn.Write(buf)
+	if err != nil {
+		PanicMessage("PublicKeyReply: Write ROOT_REPLY to UDP failure\n")
+		return
+	}
+
+	// recieve Root
+	buf = make([]byte, DATAGRAM_SIZE)
+	conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
+	var l int
+	l, _, err = conn.ReadFromUDP(buf)
+	if err != nil {
+		if err != io.EOF {
+			fmt.Printf("Root: ReadFromUDP error %v\n", err)
+			return
 		}
 	}
+	if CheckTypeEquality(byte(ROOT_REPLY), buf) == -1 {
+		return
+	}
+
+	fmt.Printf("---- MaintainConnectionServer: Receive ROOT_REPLY %d ---- \n", l)
+
+	messCounter++
 }
 
 // Replies to getDatum requests
@@ -245,20 +262,24 @@ func SendData(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root No
 	if value != nil {
 		length = len(value) + 1
 	}
+	fmt.Printf("value: %v\n", value)
 
-	message := make([]byte, 4+1+2+length)
+	message := make([]byte, 4+1+2+length+HASH_SIZE)
 	if node == nil {
 		copy(message[0:4], msgID)
 		message[4] = byte(NO_DATUM)
 		binary.BigEndian.PutUint16(message[5:7], uint16(length))
 		copy(message[7:], hash)
 	} else {
-		binary.BigEndian.PutUint32(message[0:4], messCounter)
-		message[4] = byte(NO_DATUM)
+		copy(message[0:4], msgID)
+		//binary.BigEndian.PutUint32(message[0:4], msgID)
+		message[4] = byte(DATUM)
 		binary.BigEndian.PutUint16(message[5:7], uint16(length))
-		message[5] = byte(root.nodeType)
+		message[5] = byte(root.NodeType)
 		copy(message[8:], hash)
 	}
+
+	fmt.Printf("message to send: %v\n", message)
 
 	// pick the right write method depending on how the client listening and handling of incoming message is done (clarified during call )
 	n, err := conn.WriteToUDP(message, remoteAddr)
@@ -268,7 +289,8 @@ func SendData(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root No
 		return 404
 	}
 	if LOG_PRINT_DATA {
-		fmt.Printf("[INFO] wrote %d bytes to %s ", n, remoteAddr)
+		st := fmt.Sprintf("[INFO] wrote %d bytes to %s \n", n, remoteAddr)
+		DebugPrint(st)
 	}
 	// success
 	return 200
@@ -285,7 +307,8 @@ func sendHelloReply(conn *net.UDPConn, remoteAddr *net.UDPAddr, myPeer string, m
 	}
 
 	if LOG_PRINT_DATA {
-		fmt.Printf("[INFO]: Greetings to %s with %d bytes", remoteAddr, n)
+		st := fmt.Sprintf("[INFO]: Greetings to %s with %d bytes\n", remoteAddr, n)
+		DebugPrint(st)
 	}
 
 	return 200
@@ -295,8 +318,7 @@ func sendHelloReply(conn *net.UDPConn, remoteAddr *net.UDPAddr, myPeer string, m
 // replies to incoming udp messages depending on their type
 func ReplyToIncoming(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root Node, myPeer string) (status int) {
 
-	var msgType uint8
-	msgType = uint8(buffer[5])
+	msgType := uint8(buffer[5])
 	length := binary.BigEndian.Uint16(buffer[5:7])
 	if int(length) != len(buffer[7:]) {
 		// length mismatch
@@ -309,11 +331,14 @@ func ReplyToIncoming(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, 
 	case HELLO:
 		return sendHelloReply(conn, remoteAddr, myPeer, buffer[0:4])
 	case NAT_TRAVERSAL:
-		// do nothing
-		break
+		var newConn *net.UDPConn
+		newConn = NatTraversalServer(buffer, 0)
+		SendData(newConn, remoteAddr, buffer[7:], root)
+		return RESULT_OK
+	default:
+		// unknown request
+		return 404
 	}
-	// unknown request
-	return 404
 }
 
 // ==========================   Auxiliary TCP functions ========================== //
@@ -614,7 +639,7 @@ func sendHello(conn *net.UDPConn, myPeer string) (bool, error) {
 func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strTypeExp string) int {
 
 	// check lenght  -> if error, exit from function to re-send request
-	hasToBe := binary.BigEndian.Uint16(bufRes[5:7]) + 4 + 1 + 2 + 64
+	hasToBe := binary.BigEndian.Uint16(bufRes[POS_LENGTH:POS_BODY]) + ID_SIZE + TYPE_SIZE + LENGTH_SIZE + SIGN_SIZE
 	if LOG_PRINT_DATA {
 		//fmt.Println("\n-------- check lenght -------------")
 		//fmt.Printf("readed    : %d\n", lenRecieved)
@@ -629,13 +654,11 @@ func CheckUDPIncomingPacket(bufRes []byte, lenRecieved int, typeExp int, strType
 
 	// check type -> if error, reject and wait the next response
 	if CheckTypeEquality(byte(typeExp), bufRes) == -1 {
-		st := fmt.Sprintf("Not type %d was recieved, but %d\n", typeExp, bufRes[4:5][0])
-		PrintError(st)
 		return 2
 	}
 
 	// check id  -> if error, exit from function to re-send request
-	id := binary.BigEndian.Uint32(bufRes[:4])
+	id := binary.BigEndian.Uint32(bufRes[:POS_TYPE])
 
 	if LOG_PRINT_DATA {
 		//fmt.Println("\n---------- check id -----------")
@@ -660,33 +683,56 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 	if LOG_PRINT_DATA {
 		fmt.Printf(">GetDataByHash(..., %v..., %s)\n", hash[0:32], myPeer)
 	}
-	isRecieved := false
 
 	// send GetDatum
 	buf := composeGetDatumMessage(messCounter, byte(GET_DATUM), myPeer, HASH_SIZE, hash, 0)
-	_, err := conn.Write(buf)
-	if err != nil {
-		PrintError("GetDataByHash: Write to UDP failure\n")
-		return nil, err
-	}
-
-	conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
-
 	bufRes := make([]byte, DATAGRAM_SIZE)
+
 	timeStart := time.Now()
 
-	// receive Datum until a response with the required ID is received
-	for !isRecieved {
+	resendRequest := true
 
-		// receive Datum
-		all, _, err := conn.ReadFromUDP(bufRes)
-		if err != nil {
-			if err != io.EOF {
-				messCounter++
-				HandleFatalError(err, "GetDataByHash: ReadFromUDP")
+	// receive Datum until a response with the required ID is received
+	for {
+		if time.Now().Sub(timeStart) >= 30*time.Second {
+			messCounter++
+			return nil, errors.New("GetDataByHash: Timeout reception of DATUM")
+		}
+
+		if resendRequest {
+			resendRequest = false
+			_, err := conn.Write(buf)
+			if err != nil {
+				PrintError("GetDataByHash: Write to UDP failure\n")
 				return nil, err
 			}
 		}
+
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // set Timeout
+
+		// receive Datum
+		all, _, err := conn.ReadFromUDP(bufRes)
+
+		if err != nil {
+			if err != io.EOF {
+				PrintError("GetDataByHash: timeout, resend\n")
+				resendRequest = true
+				continue
+			}
+		}
+
+		//if err != nil {
+		//	e, ok := err.(net.Error)
+		//	if !ok || !e.Timeout() {
+		//		messCounter++
+		//		HandleFatalError(err, "GetDataByHash: ReadFromUDP")
+		//		return nil, err
+		//	} else if e.Timeout() {
+		//		PrintError("GetDataByHash: timeout, resend\n")
+		//		resendRequest = true
+		//		continue
+		//	}
+		//}
 
 		// check id
 		if binary.BigEndian.Uint32(bufRes[:POS_TYPE]) == messCounter {
@@ -732,7 +778,6 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 			}
 
 			messCounter++
-			isRecieved = true
 
 			if LOG_PRINT_DATA {
 				fmt.Printf("GetDataByHash Value: %v \n\n", value)
@@ -741,13 +786,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 			return value, nil
 
 		} else {
-			PanicMessage("GetDataByHash: MessageId DATUM != MessageId GET_DATUM\n")
-			timeNow := time.Now()
-
-			if timeStart.Sub(timeNow) >= TIMEOUT {
-				messCounter++
-				return nil, errors.New("GetDataByHash: Timeout reception of DATUM")
-			}
+			PanicMessage(fmt.Sprintf("GetDataByHash: MessageId DATUM %d != %d MessageId GET_DATUM\n", binary.BigEndian.Uint32(bufRes[:POS_TYPE]), messCounter))
 		}
 	}
 	return nil, nil
