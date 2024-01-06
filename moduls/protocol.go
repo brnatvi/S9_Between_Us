@@ -257,7 +257,7 @@ func SendData(conn *net.UDPConn, remoteAddr *net.UDPAddr, buffer []byte, root No
 		message[4] = byte(NO_DATUM)
 		binary.BigEndian.PutUint16(message[5:7], uint16(length))
 		message[5] = byte(root.nodeType)
-		copy(message[8:], hash)
+		copy(message[8:], value)
 	}
 
 	// pick the right write method depending on how the client listening and handling of incoming message is done (clarified during call )
@@ -289,6 +289,52 @@ func sendHelloReply(conn *net.UDPConn, remoteAddr *net.UDPAddr, myPeer string, m
 	}
 
 	return 200
+
+}
+
+func GetData(client *http.Client, peer string, hash string) {
+
+	addresses := PeerAddr(client, peer)
+
+	var conn *net.UDPConn
+	var i int
+	for i = 0; i < len(addresses); i++ {
+		addr, err := net.ResolveUDPAddr("udp", addresses[i])
+		HandlePanicError(err, "[ERROR] cant resolve udp address")
+
+		conn, err = net.DialUDP("udp", nil, addr)
+		HandlePanicError(err, "[ERROR] cant dial address")
+		if err != nil {
+			break
+		}
+
+		// NatTraversal()
+	}
+
+	// if i == len(addresses) {
+	// 	fmt.Printf("[ERROR] Could not reach remote host \n")
+	// 	return
+	// }
+
+	data, err := GetDataByHash(conn, []byte(hash), "")
+	if err != nil {
+		HandlePanicError(err, "[ERROR] error fetching data ")
+		return
+	}
+	if err != nil {
+		switch int(data[7]) {
+		case DIRECTORY:
+			fmt.Printf("Dir contents: \n")
+			for i := 8; i < len(data); i += 64 {
+				fmt.Printf("- %s -- hash: %s \n", data[i:i+32], data[i+32:i+64])
+			}
+			break
+		default:
+			var dobj *DataObject
+			DownloadData(conn, []byte(hash), " ", dobj)
+			break
+		}
+	}
 
 }
 

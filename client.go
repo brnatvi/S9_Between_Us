@@ -84,8 +84,36 @@ func main() {
 		}
 
 	} else if MODE_MENU == os.Args[MODE_IDX] {
+
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%s", port))
+		moduls.HandlePanicError(err, "[ERROR]: err resolving address ")
+		conn, err := net.ListenUDP("udp", addr)
+		if moduls.LOG_PRINT_DATA {
+			fmt.Printf("Listening on port %s", port)
+		}
+
+		serverStringAddr := moduls.PeerAddr(client, "jch.irif.fr")
+		// Create UDP connection with server
+		serverAddr, err := net.ResolveUDPAddr("udp", serverStringAddr[0])
+		moduls.HandleFatalError(err, "ResolveUDPAddr failure")
+
+		serverConn, err := net.DialUDP("udp", nil, serverAddr)
+		moduls.HandleFatalError(err, "DialUDP failure")
+
+		go moduls.MaintainConnectionServer(serverConn, myPeer, dirPath)
 		reader := bufio.NewReader(os.Stdin)
-		menu(reader, client)
+		go menu(reader, client)
+		var root moduls.Node
+		for {
+			root = moduls.Merkelify(dirPath)
+
+			buffer := make([]byte, moduls.DATAGRAM_SIZE)
+			_, remoteAddr, err := conn.ReadFromUDP(buffer)
+			moduls.HandlePanicError(err, fmt.Sprintf("[ERROR] reading message from %s: ", remoteAddr))
+			moduls.ReplyToIncoming(conn, remoteAddr, buffer, root, myPeer)
+
+		}
+
 	}
 }
 
@@ -257,31 +285,36 @@ Options:
 	p -a: shows p's addresses
 	p -k: shows p's public key (if it has one)
 	p -r: shows p's root hash
-	p -d: asks for data from peer p, writes it to local file named p-timestamp
+	p -d: prompt to ask for hash to request from peer p
 	files: (on hold)
 	exit: exits
 =>`)
 		cmd, err := reader.ReadString('\n')
 		cmd = cmd[:len(cmd)-1]
-		moduls.HandlePanicError(err, "Read err!")
+		moduls.HandlePanicError(err, "[ERROR] Read err!")
 
 		command, peer := parseCmd(cmd)
 		switch command {
 		case 0:
 			moduls.GetAllPeersAdresses(client)
-			moduls.DebugPrint("get peers")
 		case 1:
-			moduls.PeerAddr(client, peer)
-			moduls.DebugPrint("addr")
+			addrs := moduls.PeerAddr(client, peer)
+			fmt.Printf("%s 's addresses : \n", peer)
+			fmt.Println(addrs)
 		case 2:
-			moduls.PeerKey(client, peer)
-			moduls.DebugPrint("key")
+			key := moduls.PeerKey(client, peer)
+			fmt.Printf("%s 's key : \n", peer)
+			fmt.Println(key)
 		case 3:
-			moduls.PeerRoot(client, peer)
-			moduls.DebugPrint("root")
+			root := moduls.PeerRoot(client, peer)
+			fmt.Printf("%s 's root hash : \n", peer)
+			fmt.Printf("%x \n", root)
 		case 4:
-			//	moduls.GetData(peer)
-			moduls.DebugPrint("data")
+			fmt.Printf("Requested hash:")
+			hash, err := reader.ReadString('\n')
+			moduls.HandlePanicError(err, "[ERROR] read err ")
+			moduls.GetData(client, peer, hash)
+			reader.Discard(reader.Buffered())
 		case 5:
 			return
 		default:

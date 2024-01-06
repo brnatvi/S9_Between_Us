@@ -30,9 +30,9 @@ func Merkelify(path string) (root Node) {
 		r = hashFile(path)
 	}
 
-	if LOG_PRINT_DATA {
-		PrintMerkelTree(r, " ")
-	}
+	// if LOG_PRINT_DATA {
+	// 	PrintMerkelTree(r, " ")
+	// }
 
 	return r
 }
@@ -166,7 +166,30 @@ func getHash(root Node, targetHash []byte) (node *Node, value []byte) {
 
 	if compareHash(root.hash, targetHash) {
 		path := strings.TrimSuffix(root.name, "/")
-		data := getDataWithOffset(path, root.offset)
+		var data []byte
+
+		if root.nodeType == DIRECTORY {
+			dir := make([]byte, (len(root.children)+1)*64)
+
+			for i, child := range root.children {
+				base_idx := i * 64
+				copy(dir[base_idx:base_idx+32], []byte(child.name))
+				copy(dir[base_idx+32:base_idx+64], child.hash)
+			}
+
+			copy(data, dir)
+		} else if root.nodeType == BIG_FILE {
+			file := make([]byte, (len(root.children)+1)*32)
+
+			for i, child := range root.children {
+				base_idx := i * 32
+				copy(file[base_idx:base_idx+32], []byte(child.hash))
+			}
+
+			copy(data, file)
+		} else {
+			data = getDataWithOffset(path, root.offset)
+		}
 		return &root, data
 	}
 
