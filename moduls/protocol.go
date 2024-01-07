@@ -18,7 +18,7 @@ import (
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
-const LOG_PRINT_DATA = false
+const LOG_PRINT_DATA = true
 
 var messCounter uint32 = 1
 
@@ -141,13 +141,17 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 	ServerPublicKey := buf[7:l]
 
 	// send PublicKeyReply
-	buf = composeHandChakeMessage(newMessId, byte(PUBLIC_KEY_REPLY), myPeer, 0, 0)
+	buf = composeKeySendMessage(newMessId, byte(PUBLIC_KEY_REPLY), SIGN_SIZE)
+
+	fmt.Printf("composeKeySendMessage %d\n", len(buf))
+
 	_, err = conn.Write(buf)
 	if err != nil {
 		PanicMessage("PublicKeyReply: Write PUBLIC_KEY_REPLY to UDP failure\n")
 		return nil
 	}
 	messCounter++
+	fmt.Printf("1\n")
 
 	conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
 
@@ -166,10 +170,15 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 
 	newMessId = binary.BigEndian.Uint32(buf[:4])
 
+	fmt.Printf("2\n")
 	// send Hash("")
 	if root == nil {
+		fmt.Printf("3\n")
 		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), HASH_SIZE, "")
-
+		sign := SignMessage(buf, MyPrivateKey)
+		fmt.Printf("4 len %d %d\n", len(sign), len(buf))
+		buf = append(buf, sign...)
+		fmt.Printf("4 len %d\n", len(buf))
 	} else {
 		var bytesBuffer bytes.Buffer
 		i := make([]byte, 4)
@@ -184,7 +193,9 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 
 		bytesBuffer.Write(root.Hash)
 
-		// TODO where value!!
+		sign := SignMessage(bytesBuffer.Bytes(), MyPrivateKey)
+
+		bytesBuffer.Write(sign)
 
 		buf = bytesBuffer.Bytes()
 
@@ -561,7 +572,11 @@ func composeHandChakeMessage(idMes uint32, typeMes uint8, myPeer string, lenMes 
 	buf.Write(k)
 
 	buf.WriteString(myPeer)
-	//fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	sign := SignMessage(buf.Bytes(), MyPrivateKey)
+
+	buf.Write(sign)
+	fmt.Printf("my message %d :\n%v\n\n", typeMes, buf.Bytes()) // for debug
 
 	return buf.Bytes()
 }
@@ -613,6 +628,34 @@ func composeDataSendMessage(idMes uint32, typeMes uint8, lenMes int, valueMes st
 
 	buf.WriteString(valueMes)
 	//fmt.Printf("my bin message : %v\n\n", buf.Bytes()) // for debug
+
+	return buf.Bytes()
+}
+
+func composeKeySendMessage(idMes uint32, typeMes uint8, lenMes int) []byte {
+	var buf bytes.Buffer
+
+	i := make([]byte, 4)
+	binary.BigEndian.PutUint32(i, idMes)
+	buf.Write(i)
+
+	buf.WriteByte(typeMes)
+
+	j := make([]byte, 2)
+	binary.BigEndian.PutUint16(j, uint16(lenMes))
+	buf.Write(j)
+
+	pk := FormatPublicKey(MyPublicKey)
+	//	fmt.Printf("PK %v\n", pk)
+	//	fmt.Printf("len PK %d\n", len(pk))
+
+	buf.Write(pk)
+
+	sign := SignMessage(buf.Bytes(), MyPrivateKey)
+	buf.Write(sign)
+	//	fmt.Printf("PK sign %v\n", sign)
+	//	fmt.Printf("len PK sign %d\n", len(sign))
+	//	fmt.Printf("len PK buf %d\n", len(buf.Bytes()))
 
 	return buf.Bytes()
 }
@@ -740,6 +783,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 
 	// receive Datum until a response with the required ID is received
 	for {
+		fmt.Printf(">GetDataByHash+++\n")
 		if time.Now().Sub(timeStart) >= 30*time.Second {
 			messCounter++
 			return nil, errors.New("GetDataByHash: Timeout reception of DATUM")
@@ -747,6 +791,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 
 		if resendRequest {
 			resendRequest = false
+			fmt.Printf(">GetDataByHash>>>\n")
 			_, err := conn.Write(buf)
 			if err != nil {
 				PrintError("GetDataByHash: Write to UDP failure\n")
@@ -766,6 +811,7 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 				continue
 			}
 		}
+		fmt.Printf(">GetDataByHash<<<\n")
 
 		//if err != nil {
 		//	e, ok := err.(net.Error)

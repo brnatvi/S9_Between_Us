@@ -16,7 +16,6 @@ func NatTraversalServer(message []byte, i int) *net.UDPConn {
 	stAddrPeer := string(message[POS_VALUE:(POS_VALUE + len)])
 	fmt.Printf("Address of peer : %s\n", stAddrPeer)
 
-	//Natalia: why port is hardcoded???
 	myAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", (8443+i)))
 	HandleFatalError(err, "ResolveUDPAddr failure")
 
@@ -43,7 +42,7 @@ func NatTraversalServer(message []byte, i int) *net.UDPConn {
 
 func NatTraversal(tcpClient *http.Client, conn *net.UDPConn, connPeer *net.UDPConn, myPeer string, otherPeer string) int {
 	// max 3 attempts to send Hello to otherPeer
-	maxNbAtts := 1
+	maxNbAtts := 2
 	count := 1
 	bufRes := make([]byte, DATAGRAM_SIZE)
 

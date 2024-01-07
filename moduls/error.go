@@ -2,7 +2,6 @@ package moduls
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -60,7 +59,7 @@ func CheckTypeEquality(wantedType byte, recieved []byte) int {
 			string(colorYellow),
 			wantedType,
 			recieved[POS_TYPE:POS_LENGTH][0],
-			hex.EncodeToString(recieved[POS_HASH:(POS_HASH+len)]),
+			string(recieved[POS_HASH:(POS_HASH+len)]),
 			string(colorReset))
 		return -1
 	}
