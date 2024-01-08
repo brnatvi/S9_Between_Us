@@ -218,20 +218,15 @@ func processClient(client *http.Client) {
 		connPeer, err := net.DialUDP("udp", nil, addrPeer)
 		moduls.HandleFatalError(err, "DialUDP peer failure")
 
-		fmt.Printf("5\n")
-
 		if moduls.NatTraversal(client, conn, connPeer, os.Args[PEER_NAME_IDX], os.Args[PEER_IDX]) == moduls.RESULT_OK {
 			fmt.Printf("\nNatTraversal OK  --> Connected to peer { %s }\n", os.Args[PEER_IDX])
 		} else {
 			fmt.Printf("\nNatTraversal NotOK --> Not connected to peer { %s }\n", os.Args[PEER_IDX])
 		}
 
-		fmt.Printf("6\n")
 		if "HashesInfo" == os.Args[CMD_IDX] {
-			fmt.Printf("7\n")
 			DataObj := moduls.DataObject{moduls.OP_PRINT_HASH, moduls.NODE_UNKNOWN, "", "/", "", ".", nil}
 			moduls.DownloadData(connPeer, rootPeer, os.Args[PEER_NAME_IDX], &DataObj)
-			fmt.Printf("8\n")
 		} else {
 			if len(os.Args)-1 < 7 {
 				moduls.PrintError("Wrong console arguments")

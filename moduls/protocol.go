@@ -18,7 +18,7 @@ import (
 
 const url = "https://jch.irif.fr:8443"
 const TIMEOUT = 5 * time.Second
-const LOG_PRINT_DATA = true
+const LOG_PRINT_DATA = false
 
 var messCounter uint32 = 1
 
@@ -143,15 +143,12 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 	// send PublicKeyReply
 	buf = composeKeySendMessage(newMessId, byte(PUBLIC_KEY_REPLY), SIGN_SIZE)
 
-	fmt.Printf("composeKeySendMessage %d\n", len(buf))
-
 	_, err = conn.Write(buf)
 	if err != nil {
 		PanicMessage("PublicKeyReply: Write PUBLIC_KEY_REPLY to UDP failure\n")
 		return nil
 	}
 	messCounter++
-	fmt.Printf("1\n")
 
 	conn.SetReadDeadline(time.Now().Add(TIMEOUT)) // set Timeout
 
@@ -170,15 +167,11 @@ func RegistrationOnServer(conn *net.UDPConn, myPeer string, root *Node) []byte {
 
 	newMessId = binary.BigEndian.Uint32(buf[:4])
 
-	fmt.Printf("2\n")
 	// send Hash("")
 	if root == nil {
-		fmt.Printf("3\n")
 		buf = composeDataSendMessage(newMessId, byte(ROOT_REPLY), HASH_SIZE, "")
 		sign := SignMessage(buf, MyPrivateKey)
-		fmt.Printf("4 len %d %d\n", len(sign), len(buf))
 		buf = append(buf, sign...)
-		fmt.Printf("4 len %d\n", len(buf))
 	} else {
 		var bytesBuffer bytes.Buffer
 		i := make([]byte, 4)
@@ -230,7 +223,12 @@ func MaintainConnectionServer(conn *net.UDPConn, root *Node) {
 	bytesBuffer.Write(j)
 
 	bytesBuffer.Write(root.Hash)
+
 	buf = bytesBuffer.Bytes()
+
+	sign := SignMessage(buf, MyPrivateKey)
+
+	buf = append(buf, sign...)
 
 	_, err := conn.Write(buf)
 	if err != nil {
@@ -576,7 +574,7 @@ func composeHandChakeMessage(idMes uint32, typeMes uint8, myPeer string, lenMes 
 	sign := SignMessage(buf.Bytes(), MyPrivateKey)
 
 	buf.Write(sign)
-	fmt.Printf("my message %d :\n%v\n\n", typeMes, buf.Bytes()) // for debug
+	//	fmt.Printf("my message %d :\n%v\n\n", typeMes, buf.Bytes()) // for debug
 
 	return buf.Bytes()
 }
@@ -783,7 +781,6 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 
 	// receive Datum until a response with the required ID is received
 	for {
-		fmt.Printf(">GetDataByHash+++\n")
 		if time.Now().Sub(timeStart) >= 30*time.Second {
 			messCounter++
 			return nil, errors.New("GetDataByHash: Timeout reception of DATUM")
@@ -791,7 +788,6 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 
 		if resendRequest {
 			resendRequest = false
-			fmt.Printf(">GetDataByHash>>>\n")
 			_, err := conn.Write(buf)
 			if err != nil {
 				PrintError("GetDataByHash: Write to UDP failure\n")
@@ -811,7 +807,6 @@ func GetDataByHash(conn *net.UDPConn, hash []byte, myPeer string) ([]byte, error
 				continue
 			}
 		}
-		fmt.Printf(">GetDataByHash<<<\n")
 
 		//if err != nil {
 		//	e, ok := err.(net.Error)
